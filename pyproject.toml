@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling==1.31.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pr-readiness-fixture"
+version = "0.1.0"
+description = "Controlled fixture for the Impetus PR-readiness laboratory"
+requires-python = ">=3.12"
+
+[dependency-groups]
+dev = [
+  "pytest==9.1.1",
+  "ruff==0.15.22",
+  "ty==0.0.63",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ty.src]
+include = ["src", "tools"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pr_fixture"]
