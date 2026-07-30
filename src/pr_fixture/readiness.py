@@ -19,7 +19,7 @@ def ready_for_release(facts: PullRequestFacts) -> bool:
 def required_approvals(risk: str) -> int:
     """Return the review threshold for a supported risk level."""
     if risk == "high":
-        return 1
+        return 2
     if risk == "normal":
         return 1
     raise ValueError(f"unsupported risk level: {risk}")
