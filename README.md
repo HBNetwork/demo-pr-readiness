@@ -5,6 +5,8 @@ committed `.pr-lab/scenario.json` is validated by the stdlib-only
 `tools/scenario_control.py`. Laboratory patches and answer material are not
 part of this tree.
 
+This clean-green branch demonstrates first-pass PR readiness.
+
 Run checks from this directory with the committed lock:
 
 ```console
