@@ -1,12 +1,13 @@
 {
-  "schema_version": 1,
-  "scenario": "clean-green",
   "behavior": {
-    "kind": "pass"
+    "fingerprint": "hamsterdan:first-attempt-flake:v1",
+    "kind": "first_attempt_flake"
   },
   "review_lenses": [
     "correctness",
     "test-quality",
     "risk"
-  ]
+  ],
+  "scenario": "first-attempt-flake",
+  "schema_version": 1
 }
