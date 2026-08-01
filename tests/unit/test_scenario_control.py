@@ -38,6 +38,8 @@ def git(root: Path, *arguments: str) -> None:
 def repository(tmp_path: Path) -> Path:
     root = tmp_path / "repository"
     shutil.copytree(ROOT, root, ignore=shutil.ignore_patterns(".git", ".venv", "__pycache__"))
+    shutil.rmtree(root / "scenario-fixtures", ignore_errors=True)
+    shutil.rmtree(root / ".pr-lab/evidence", ignore_errors=True)
     git(root, "init", "-q")
     git(root, "config", "user.email", "scenario@example.invalid")
     git(root, "config", "user.name", "Scenario Test")
@@ -203,7 +205,7 @@ def test_evaluate_cli_writes_exact_bounded_evidence_shape(repository: Path) -> N
     base_sha = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=repository, check=True, capture_output=True, text=True
     ).stdout.strip()
-    prepare("clean-green", repository)
+    prepared = prepare("clean-green", repository)
     git(repository, "add", ".pr-lab/scenario.json", "scenario-fixtures/clean_green.py")
     git(repository, "commit", "-qm", "prepare clean-green")
     head_sha = subprocess.run(
@@ -256,7 +258,7 @@ def test_evaluate_cli_writes_exact_bounded_evidence_shape(repository: Path) -> N
         "result_sha256",
     }
     assert value["expected_result"] == value["observed_result"] == "pass"
-    assert value["observed_changed_paths"] == ["scenario-fixtures/clean_green.py"]
+    assert value["observed_changed_paths"] == prepared["observed_changed_paths"]
     assert len(evidence.read_bytes()) < 4096
 
 
