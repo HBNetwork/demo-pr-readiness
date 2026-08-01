@@ -38,6 +38,13 @@ def git(root: Path, *arguments: str) -> None:
 def repository(tmp_path: Path) -> Path:
     root = tmp_path / "repository"
     shutil.copytree(ROOT, root, ignore=shutil.ignore_patterns(".git", ".venv", "__pycache__"))
+    shutil.rmtree(root / "scenario-fixtures")
+    manifest = json.loads((root / ".pr-lab/scenarios/clean-green/scenario.json").read_text())
+    control = {
+        "schema_version": 1,
+        **{key: manifest[key] for key in ("scenario", "behavior", "review_lenses")},
+    }
+    (root / ".pr-lab/scenario.json").write_text(json.dumps(control, indent=2) + "\n")
     git(root, "init", "-q")
     git(root, "config", "user.email", "scenario@example.invalid")
     git(root, "config", "user.name", "Scenario Test")

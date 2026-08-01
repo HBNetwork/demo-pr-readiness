@@ -59,3 +59,12 @@ uv run --frozen --offline pytest tests/unit
 uv build --offline
 uv run --offline --isolated --no-project --with dist/*.whl --with pytest==9.1.1 pytest tests/integration
 ```
+
+## Release-readiness example
+
+The conversational-change fixture produces a deterministic summary for a
+known approval count:
+
+```python
+release_summary(2) == "release has 2 approval(s)"
+```
