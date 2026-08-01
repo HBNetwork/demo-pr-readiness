@@ -34,10 +34,26 @@ def git(root: Path, *arguments: str) -> None:
     subprocess.run(["git", *arguments], cwd=root, check=True, capture_output=True)
 
 
+def remove_path(path: Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.exists():
+        shutil.rmtree(path)
+
+
 @pytest.fixture
 def repository(tmp_path: Path) -> Path:
     root = tmp_path / "repository"
     shutil.copytree(ROOT, root, ignore=shutil.ignore_patterns(".git", ".venv", "__pycache__"))
+    remove_path(root / "scenario-fixtures")
+    manifest = json.loads((root / ".pr-lab/scenarios/clean-green/scenario.json").read_text())
+    control = {
+        "schema_version": 1,
+        "scenario": manifest["scenario"],
+        "behavior": manifest["behavior"],
+        "review_lenses": manifest["review_lenses"],
+    }
+    (root / ".pr-lab/scenario.json").write_text(json.dumps(control, indent=2) + "\n")
     git(root, "init", "-q")
     git(root, "config", "user.email", "scenario@example.invalid")
     git(root, "config", "user.name", "Scenario Test")
@@ -160,7 +176,9 @@ def test_prepare_refuses_symlinked_target_parent_without_outside_write(
 ) -> None:
     outside = tmp_path / "outside"
     outside.mkdir()
-    (repository / "scenario-fixtures").symlink_to(outside, target_is_directory=True)
+    target_parent = repository / "scenario-fixtures"
+    remove_path(target_parent)
+    target_parent.symlink_to(outside, target_is_directory=True)
     with pytest.raises(ControlError, match="symlink"):
         prepare("clean-green", repository)
     assert list(outside.iterdir()) == []
@@ -173,7 +191,7 @@ def test_prepare_refuses_dirty_preexisting_and_wrong_basis(repository: Path) -> 
     (repository / "unadmitted.txt").unlink()
 
     target = repository / "scenario-fixtures/clean_green.py"
-    target.parent.mkdir()
+    target.parent.mkdir(exist_ok=True)
     target.write_text("preexisting")
     git(repository, "add", "scenario-fixtures/clean_green.py")
     git(repository, "commit", "-qm", "pre-existing target")
@@ -203,9 +221,10 @@ def test_evaluate_cli_writes_exact_bounded_evidence_shape(repository: Path) -> N
     base_sha = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=repository, check=True, capture_output=True, text=True
     ).stdout.strip()
-    prepare("clean-green", repository)
-    git(repository, "add", ".pr-lab/scenario.json", "scenario-fixtures/clean_green.py")
-    git(repository, "commit", "-qm", "prepare clean-green")
+    prepared = prepare("conversational-change", repository)
+    admitted_changed_paths = prepared["admitted_changed_paths"]
+    git(repository, "add", *admitted_changed_paths)
+    git(repository, "commit", "-qm", "prepare conversational-change")
     head_sha = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=repository, check=True, capture_output=True, text=True
     ).stdout.strip()
@@ -256,8 +275,37 @@ def test_evaluate_cli_writes_exact_bounded_evidence_shape(repository: Path) -> N
         "result_sha256",
     }
     assert value["expected_result"] == value["observed_result"] == "pass"
-    assert value["observed_changed_paths"] == ["scenario-fixtures/clean_green.py"]
+    assert value["admitted_changed_paths"] == admitted_changed_paths
+    assert value["observed_changed_paths"] == admitted_changed_paths
     assert len(evidence.read_bytes()) < 4096
+
+
+@pytest.mark.parametrize("scenario", sorted(SCENARIOS))
+def test_scenario_control_subprocess_tests_pass_from_prepared_checkout(
+    repository: Path, scenario: str
+) -> None:
+    prepared = prepare(scenario, repository)
+    git(repository, "add", *prepared["admitted_changed_paths"])
+    git(repository, "commit", "-qm", f"prepare {scenario}")
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "tests/unit/test_scenario_control.py",
+            "-q",
+            "-k",
+            "prepare_refuses_symlinked_target_parent_without_outside_write or "
+            "prepare_refuses_dirty_preexisting_and_wrong_basis or "
+            "evaluate_cli_writes_exact_bounded_evidence_shape or "
+            "attempt_defaults_from_environment_for_legacy_and_subcommand",
+        ],
+        cwd=repository,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_registry_rejects_invalid_schema_and_scenario_target_aliasing(repository: Path) -> None:
@@ -345,14 +393,17 @@ def test_explicit_manifest_must_be_canonical() -> None:
     assert rejected.returncode == 2
 
 
-def test_attempt_defaults_from_environment_for_legacy_and_subcommand() -> None:
+def test_attempt_defaults_from_environment_for_legacy_and_subcommand(repository: Path) -> None:
     env = {**os.environ, "GITHUB_RUN_ATTEMPT": "2"}
     legacy = subprocess.run(
-        [sys.executable, "tools/scenario_control.py"], cwd=ROOT, env=env, capture_output=True
+        [sys.executable, "tools/scenario_control.py"],
+        cwd=repository,
+        env=env,
+        capture_output=True,
     )
     command = subprocess.run(
         [sys.executable, "tools/scenario_control.py", "evaluate", "first-attempt-flake"],
-        cwd=ROOT,
+        cwd=repository,
         env=env,
         capture_output=True,
     )
@@ -360,7 +411,7 @@ def test_attempt_defaults_from_environment_for_legacy_and_subcommand() -> None:
     assert json.loads(command.stdout)["observed_result"] == "pass"
     invalid = subprocess.run(
         [sys.executable, "tools/scenario_control.py", "evaluate", "clean-green"],
-        cwd=ROOT,
+        cwd=repository,
         env={**os.environ, "GITHUB_RUN_ATTEMPT": "invalid"},
         capture_output=True,
     )
