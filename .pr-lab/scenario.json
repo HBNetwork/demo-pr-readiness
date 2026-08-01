@@ -1,1 +1,12 @@
-{"behavior":{"kind":"pass"},"review_lenses":["correctness","test-quality","risk"],"scenario":"clean-green","schema_version":1}
+{
+  "schema_version": 1,
+  "scenario": "clean-green",
+  "behavior": {
+    "kind": "pass"
+  },
+  "review_lenses": [
+    "correctness",
+    "test-quality",
+    "risk"
+  ]
+}

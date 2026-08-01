@@ -367,14 +367,13 @@ def _identities(manifest: dict[str, Any], root: Path) -> tuple[str, str, str]:
 
 
 def _selector(manifest: dict[str, Any]) -> bytes:
-    return _canonical(
-        {
-            "schema_version": 1,
-            "scenario": manifest["scenario"],
-            "behavior": manifest["behavior"],
-            "review_lenses": manifest["review_lenses"],
-        }
-    )
+    value = {
+        "schema_version": 1,
+        "scenario": manifest["scenario"],
+        "behavior": manifest["behavior"],
+        "review_lenses": manifest["review_lenses"],
+    }
+    return (json.dumps(value, indent=2) + "\n").encode()
 
 
 def _verify_basis(manifest: dict[str, Any], root: Path) -> None:
@@ -615,7 +614,7 @@ def main(argv: list[str] | None = None) -> int:
             control = load_control(args.control)
             scenario, manifest = _select_manifest(None, control["scenario"], ROOT)
             expected = _selector(manifest)
-            if _canonical(control) != expected:
+            if (json.dumps(control, indent=2) + "\n").encode() != expected:
                 raise ControlError("active control does not exactly match selected manifest")
         _verify_basis(manifest, ROOT)
         passed, conclusion = evaluate(control, attempt)

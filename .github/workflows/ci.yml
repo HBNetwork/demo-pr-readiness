@@ -23,9 +23,14 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python tools/scenario_control.py evaluate --attempt "$GITHUB_RUN_ATTEMPT" --evidence .pr-lab/evidence/scenario-control.json
+        run: |
+          if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- .pr-lab/scenario.json scenario-fixtures; then
+            python tools/scenario_control.py --attempt "$GITHUB_RUN_ATTEMPT"
+          else
+            python tools/scenario_control.py evaluate --attempt "$GITHUB_RUN_ATTEMPT" --evidence .pr-lab/evidence/scenario-control.json
+          fi
       - name: Upload scenario evidence
-        if: always()
+        if: always() && hashFiles('.pr-lab/evidence/scenario-control.json') != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: scenario-evidence
