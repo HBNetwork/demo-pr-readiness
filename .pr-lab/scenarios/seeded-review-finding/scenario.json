@@ -1,0 +1,9 @@
+{
+  "schema_version": 2,
+  "scenario": "seeded-review-finding",
+  "behavior": {"kind": "pass"},
+  "review_lenses": ["correctness", "test-quality", "risk"],
+  "source_basis": {"path": "src/pr_fixture/readiness.py", "sha256": "2beb15361677cfdfc7ae22dc326dbf27dfaee2df90bd02e78acab1434873be3f"},
+  "fixture": {"payload": ".pr-lab/scenarios/seeded-review-finding/payload.py", "target": "scenario-fixtures/seeded_review_finding.py", "admitted_changed_paths": [".pr-lab/scenario.json", "scenario-fixtures/seeded_review_finding.py"]},
+  "expectation": {"kind": "seeded_review_finding", "target": "scenario-fixtures/seeded_review_finding.py", "content_sha256": "445b988d360cc3c73383ab56f9d3655e1b8c70c13e4cc9096681aa19606504a3", "semantic_fingerprint": "ready-for-release-ignores-mergeable"}
+}

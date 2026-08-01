@@ -1,0 +1,9 @@
+{
+  "schema_version": 2,
+  "scenario": "conversational-change",
+  "behavior": {"kind": "pass"},
+  "review_lenses": ["correctness", "test-quality", "risk"],
+  "source_basis": {"path": "src/pr_fixture/readiness.py", "sha256": "2beb15361677cfdfc7ae22dc326dbf27dfaee2df90bd02e78acab1434873be3f"},
+  "fixture": {"payload": ".pr-lab/scenarios/conversational-change/payload.py", "target": "scenario-fixtures/conversational_change.py", "admitted_changed_paths": [".pr-lab/scenario.json", "scenario-fixtures/conversational_change.py"]},
+  "expectation": {"kind": "conversational_instruction", "target": "scenario-fixtures/conversational_change.py", "content_sha256": "1d053615077629dddc1050fe1f9c6d095094ad86767de355d27380ad419a2d09", "instruction": "Add a deterministic release-readiness example to README.md."}
+}

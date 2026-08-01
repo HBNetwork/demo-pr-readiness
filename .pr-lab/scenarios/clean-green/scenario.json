@@ -1,0 +1,9 @@
+{
+  "schema_version": 2,
+  "scenario": "clean-green",
+  "behavior": {"kind": "pass"},
+  "review_lenses": ["correctness", "test-quality", "risk"],
+  "source_basis": {"path": "src/pr_fixture/readiness.py", "sha256": "2beb15361677cfdfc7ae22dc326dbf27dfaee2df90bd02e78acab1434873be3f"},
+  "fixture": {"payload": ".pr-lab/scenarios/clean-green/payload.py", "target": "scenario-fixtures/clean_green.py", "admitted_changed_paths": [".pr-lab/scenario.json", "scenario-fixtures/clean_green.py"]},
+  "expectation": {"kind": "content", "target": "scenario-fixtures/clean_green.py", "content_sha256": "eeec6369b02c2e98207bdab8bff030d3e5332250de74d96320feeafb2509a27c"}
+}
