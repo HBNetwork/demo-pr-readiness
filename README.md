@@ -7,6 +7,8 @@ part of this tree.
 
 This clean-green branch demonstrates first-pass PR readiness.
 
+This follow-up head demonstrates stale-work supersession.
+
 Run checks from this directory with the committed lock:
 
 ```console
