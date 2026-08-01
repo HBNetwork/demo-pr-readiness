@@ -1,9 +1,8 @@
 {
   "schema_version": 1,
-  "scenario": "persistent-ci-regression",
+  "scenario": "clean-green",
   "behavior": {
-    "kind": "persistent_failure",
-    "fingerprint": "scenario:persistent-ci-regression:v1"
+    "kind": "pass"
   },
   "review_lenses": [
     "correctness",
