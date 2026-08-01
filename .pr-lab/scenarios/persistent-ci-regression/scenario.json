@@ -1,0 +1,9 @@
+{
+  "schema_version": 2,
+  "scenario": "persistent-ci-regression",
+  "behavior": {"kind": "persistent_failure", "fingerprint": "scenario:persistent-ci-regression:v1"},
+  "review_lenses": ["correctness", "test-quality", "risk"],
+  "source_basis": {"path": "src/pr_fixture/readiness.py", "sha256": "2beb15361677cfdfc7ae22dc326dbf27dfaee2df90bd02e78acab1434873be3f"},
+  "fixture": {"payload": ".pr-lab/scenarios/persistent-ci-regression/payload.py", "target": "scenario-fixtures/persistent_ci_regression.py", "admitted_changed_paths": [".pr-lab/scenario.json", "scenario-fixtures/persistent_ci_regression.py"]},
+  "expectation": {"kind": "content", "target": "scenario-fixtures/persistent_ci_regression.py", "content_sha256": "ab95eac2565e92ec31a069bf6ee7ef5da495b627794f02560d6535b90c234b3d"}
+}

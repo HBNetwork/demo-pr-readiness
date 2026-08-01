@@ -14,10 +14,24 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
       - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
         with:
           python-version: '3.12'
-      - run: python tools/scenario_control.py --attempt "$GITHUB_RUN_ATTEMPT"
+      - name: Evaluate scenario
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python tools/scenario_control.py evaluate --attempt "$GITHUB_RUN_ATTEMPT" --evidence .pr-lab/evidence/scenario-control.json
+      - name: Upload scenario evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: scenario-evidence
+          path: .pr-lab/evidence/scenario-control.json
+          include-hidden-files: true
+          if-no-files-found: error
 
   lint:
     needs: scenario-control
