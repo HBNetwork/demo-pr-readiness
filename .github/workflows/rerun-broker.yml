@@ -11,8 +11,9 @@ jobs:
   rerun-broker:
     if: >-
       github.event.issue.pull_request != null &&
-      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
-      startsWith(github.event.comment.body, '<!-- impetus-rerun ')
+      github.event.comment.user.type == 'Bot' &&
+      github.event.comment.user.login == 'hamster-dan[bot]' &&
+      startsWith(github.event.comment.body, '<!-- hamsterdan-rerun ')
     permissions:
       actions: write
       contents: read
@@ -33,7 +34,7 @@ jobs:
           import re
 
           marker = re.fullmatch(
-              r"<!-- impetus-rerun run=([1-9][0-9]*) head=([0-9a-f]{40}) operation=([A-Za-z0-9][A-Za-z0-9._:-]{0,127}) -->",
+              r"<!-- hamsterdan-rerun run=([1-9][0-9]*) head=([0-9a-f]{40}) operation=([A-Za-z0-9][A-Za-z0-9._:-]{0,127}) -->",
               os.environ["COMMENT_BODY"],
           )
           if marker is None:
