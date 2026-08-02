@@ -1,4 +1,4 @@
-"""Tiny domain used by the PR-readiness laboratory."""
+"""Public package exports for the CV3 authority baseline."""
 
 from .readiness import (
     PullRequestFacts,
