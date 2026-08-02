@@ -1,4 +1,4 @@
-"""Public package exports for the CV3 authority baseline."""
+"""Public package exports for the CV3 conflict demonstration on the authority baseline."""
 
 from .readiness import (
     PullRequestFacts,
