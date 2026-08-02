@@ -3,7 +3,7 @@
   "scenario": "first-attempt-flake",
   "behavior": {
     "kind": "first_attempt_flake",
-    "fingerprint": "hamsterdan:cv3-ds3-lifecycle-v2"
+    "fingerprint": "scenario:first-attempt-flake:v1"
   },
   "review_lenses": [
     "correctness",
