@@ -59,3 +59,5 @@ uv run --frozen --offline pytest tests/unit
 uv build --offline
 uv run --offline --isolated --no-project --with dist/*.whl --with pytest==9.1.1 pytest tests/integration
 ```
+
+CV3.DS2 collaboration qualification uses real GitHub reviews.
