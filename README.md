@@ -7,6 +7,18 @@ part of this tree.
 
 This clean-green branch demonstrates first-pass PR readiness.
 
+## Release-readiness example
+
+Release readiness can be evaluated deterministically from fixed pull-request
+facts, without consulting network services or mutable repository state:
+
+```pycon
+>>> from pr_fixture.readiness import PullRequestFacts, ready_for_release
+>>> facts = PullRequestFacts(draft=False, approvals=1, checks_green=True, mergeable=True)
+>>> ready_for_release(facts)
+True
+```
+
 ## Deterministic scenario laboratory
 
 The legacy schema-v1 invocation remains supported:
