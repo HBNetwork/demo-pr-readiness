@@ -332,7 +332,11 @@ def _fixture_files(manifest: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def _run_fixture_validator(
-    manifest: dict[str, Any], root: Path, paths: list[str] | None = None
+    manifest: dict[str, Any],
+    root: Path,
+    paths: list[str] | None = None,
+    *,
+    allow_repaired: bool = False,
 ) -> None:
     if manifest["expectation"]["kind"] != "hero_review":
         return
@@ -343,7 +347,7 @@ def _run_fixture_validator(
         confined = Path(temporary)
         validator_copy = confined / "validate.py"
         validator_copy.write_bytes(validator.read_bytes())
-        arguments: list[str] = []
+        arguments = ["--allow-repaired"] if allow_repaired else []
         for source in inputs:
             copy = confined / source.name
             copy.write_bytes(source.read_bytes())
@@ -838,7 +842,7 @@ def main(argv: list[str] | None = None) -> int:
             ]
             if not all(target.is_file() for target in targets):
                 raise ControlError("active scenario fixture target is missing")
-            _run_fixture_validator(manifest, ROOT)
+            _run_fixture_validator(manifest, ROOT, allow_repaired=True)
             context = _github_context(head, required=True)
             if context["run_attempt"] != str(attempt):
                 raise ControlError("attempt must equal GITHUB_RUN_ATTEMPT")
