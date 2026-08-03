@@ -24,6 +24,7 @@ deliberately external to the manifests. Use the public commands as follows:
 python tools/scenario_control.py validate
 python tools/scenario_control.py evaluate first-attempt-flake --attempt 1
 python tools/scenario_control.py prepare seeded-review-finding
+python tools/scenario_control.py prepare hero-review
 python tools/scenario_control.py inspect seeded-review-finding
 python tools/scenario_control.py validate --manifest .pr-lab/scenarios/clean-green/scenario.json
 python tools/scenario_control.py evaluate --manifest .pr-lab/scenarios/clean-green/scenario.json --json
@@ -41,6 +42,17 @@ pre-existing, or unadmitted state is refused. `inspect` is read-only and
 repeatable. `evaluate` exits 0 for pass, 1 for the scenario's expected failure,
 and 2 for invalid input. JSON is canonical and includes payload and result
 identities where applicable.
+
+`hero-review` is the deliberately bounded multi-file schema-v2 variant. Its
+manifest contains an ordered, closed `files` array with one payload path,
+target path, and SHA-256 per entry. The admitted paths must be exactly the
+selector followed by those targets in order. Its three opaque semantic
+fingerprints are enforced by a scenario-confined executable validator; neither
+the generated files nor the manifest contains expected review comments. The
+aggregate payload and result identities hash path-framed ordered contents, so
+path/content regrouping cannot preserve an identity accidentally. The fixture
+is intended to compile and pass its executable contract while leaving its
+review findings for the reviewer.
 
 Manifests cannot contain an expected commit SHA: committing such a SHA would
 change the commit and therefore the value itself. The laboratory instead

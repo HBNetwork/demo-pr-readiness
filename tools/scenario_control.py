@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -46,6 +47,9 @@ EXPECTATION_FIELDS = {
     "agent_repair": frozenset(
         {"kind", "target", "content_sha256", "failing_test", "repair_paths"}
     ),
+    "hero_review": frozenset(
+        {"kind", "semantic_fingerprints", "validator", "validator_sha256"}
+    ),
 }
 SCENARIO_CONTRACTS = {
     "clean-green": ("pass", "content"),
@@ -54,7 +58,12 @@ SCENARIO_CONTRACTS = {
     "seeded-review-finding": ("pass", "seeded_review_finding"),
     "conversational-change": ("pass", "conversational_instruction"),
     "agent-repair": ("pass", "agent_repair"),
+    "hero-review": ("pass", "hero_review"),
 }
+SINGLE_FILE_FIXTURE_FIELDS = frozenset({"payload", "target", "admitted_changed_paths"})
+HERO_FIXTURE_FIELDS = frozenset({"files", "admitted_changed_paths"})
+HERO_FILE_FIELDS = frozenset({"payload", "target", "content_sha256"})
+HERO_VALIDATOR = ".pr-lab/scenarios/hero-review/validate.py"
 
 
 class ControlError(ValueError):
@@ -101,6 +110,18 @@ def _sha256(data: bytes) -> str:
 
 def _canonical(value: Any) -> bytes:
     return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+
+
+def _framed_contents(contents: list[tuple[str, bytes]]) -> bytes:
+    """Bind ordered paths and contents without concatenation ambiguity."""
+    framed = bytearray()
+    for path, content in contents:
+        path_bytes = path.encode()
+        framed.extend(len(path_bytes).to_bytes(8, "big"))
+        framed.extend(path_bytes)
+        framed.extend(len(content).to_bytes(8, "big"))
+        framed.extend(content)
+    return bytes(framed)
 
 
 def _behavior(value: Any) -> dict[str, Any]:
@@ -193,26 +214,45 @@ def validate_manifest(value: Any, scenario_id: str, root: Path = ROOT) -> dict[s
     if not isinstance(basis["sha256"], str) or not HEX64.fullmatch(basis["sha256"]):
         raise ControlError("source_basis.sha256 must be lowercase sha256")
 
-    fixture = _closed(
-        manifest["fixture"],
-        frozenset({"payload", "target", "admitted_changed_paths"}),
-        "fixture",
+    fixture_fields = (
+        HERO_FIXTURE_FIELDS if scenario == "hero-review" else SINGLE_FILE_FIXTURE_FIELDS
     )
-    payload = safe_path(fixture["payload"], "fixture.payload")
-    target = safe_path(fixture["target"], "fixture.target")
+    fixture = _closed(manifest["fixture"], fixture_fields, "fixture")
+    canonical_prefix = f"{SCENARIOS.as_posix()}/{scenario}/"
+    files: list[dict[str, str]] = []
+    if scenario == "hero-review":
+        raw_files = fixture["files"]
+        if not isinstance(raw_files, list) or len(raw_files) < 2:
+            raise ControlError("hero fixture files must be an ordered multi-file array")
+        for index, value in enumerate(raw_files):
+            entry = _closed(value, HERO_FILE_FIELDS, f"fixture.files[{index}]")
+            payload = safe_path(entry["payload"], f"fixture.files[{index}].payload")
+            target = safe_path(entry["target"], f"fixture.files[{index}].target")
+            digest = entry["content_sha256"]
+            if not isinstance(digest, str) or not HEX64.fullmatch(digest):
+                raise ControlError("fixture file content_sha256 must be lowercase sha256")
+            files.append({"payload": payload, "target": target, "content_sha256": digest})
+    else:
+        payload = safe_path(fixture["payload"], "fixture.payload")
+        target = safe_path(fixture["target"], "fixture.target")
+        files.append({"payload": payload, "target": target, "content_sha256": ""})
+    payloads = [entry["payload"] for entry in files]
+    targets = [entry["target"] for entry in files]
+    if len(payloads) != len(set(payloads)) or len(targets) != len(set(targets)):
+        raise ControlError("fixture payloads and targets must be unique")
     admitted = fixture["admitted_changed_paths"]
     if not isinstance(admitted, list) or not admitted:
         raise ControlError("admitted_changed_paths must be a non-empty array")
     normalized = [safe_path(item, "admitted_changed_paths item") for item in admitted]
     if len(normalized) != len(set(normalized)):
         raise ControlError("admitted_changed_paths contains duplicates")
-    if normalized != [SELECTOR, target]:
-        raise ControlError(
-            "admitted_changed_paths must contain shared selector then fixture target"
-        )
-    canonical_prefix = f"{SCENARIOS.as_posix()}/{scenario}/"
-    if not payload.startswith(canonical_prefix) or payload == canonical_prefix:
-        raise ControlError("fixture.payload must be confined to its scenario directory")
+    if normalized != [SELECTOR, *targets]:
+        raise ControlError("admitted_changed_paths must contain selector then ordered targets")
+    if any(
+        not payload.startswith(canonical_prefix) or payload == canonical_prefix
+        for payload in payloads
+    ):
+        raise ControlError("fixture payloads must be confined to their scenario directory")
 
     expectation = _object(manifest["expectation"], "expectation")
     expectation_kind = expectation.get("kind")
@@ -221,12 +261,36 @@ def validate_manifest(value: Any, scenario_id: str, root: Path = ROOT) -> dict[s
         raise ControlError("expectation has invalid kind or fields")
     if SCENARIO_CONTRACTS.get(scenario) != (behavior["kind"], expectation_kind):
         raise ControlError("scenario behavior and expectation contract do not match")
-    if expectation["target"] != target:
-        raise ControlError("expectation target must equal fixture target")
-    digest = expectation["content_sha256"]
-    if not isinstance(digest, str) or not HEX64.fullmatch(digest):
-        raise ControlError("expectation.content_sha256 must be lowercase sha256")
-    if expectation_kind == "seeded_review_finding":
+    if expectation_kind != "hero_review":
+        if expectation["target"] != targets[0]:
+            raise ControlError("expectation target must equal fixture target")
+        digest = expectation["content_sha256"]
+        if not isinstance(digest, str) or not HEX64.fullmatch(digest):
+            raise ControlError("expectation.content_sha256 must be lowercase sha256")
+        files[0]["content_sha256"] = digest
+    if expectation_kind == "hero_review":
+        fingerprints = expectation["semantic_fingerprints"]
+        if (
+            not isinstance(fingerprints, list)
+            or len(fingerprints) != 3
+            or any(not isinstance(item, str) or not item for item in fingerprints)
+            or len(set(fingerprints)) != 3
+        ):
+            raise ControlError("hero review requires exactly three unique semantic fingerprints")
+        validator = safe_path(expectation["validator"], "expectation.validator")
+        if validator != HERO_VALIDATOR:
+            raise ControlError("hero validator must be the exact confined validator")
+        validator_file = _confined(root, validator, "expectation.validator")
+        if validator_file.suffix != ".py" or not validator_file.is_file():
+            raise ControlError("hero validator must be a regular Python file")
+        validator_digest = expectation["validator_sha256"]
+        if (
+            not isinstance(validator_digest, str)
+            or not HEX64.fullmatch(validator_digest)
+            or _sha256(validator_file.read_bytes()) != validator_digest
+        ):
+            raise ControlError("hero validator does not match validator_sha256")
+    elif expectation_kind == "seeded_review_finding":
         _text(expectation["semantic_fingerprint"], "semantic_fingerprint")
     elif expectation_kind == "conversational_instruction":
         _text(expectation["instruction"], "instruction")
@@ -236,18 +300,69 @@ def validate_manifest(value: Any, scenario_id: str, root: Path = ROOT) -> dict[s
         if not isinstance(repair_paths, list) or not repair_paths:
             raise ControlError("repair_paths must be a non-empty array")
         repairs = [safe_path(item, "repair_paths item") for item in repair_paths]
-        if len(repairs) != len(set(repairs)) or target not in repairs:
+        if len(repairs) != len(set(repairs)) or targets[0] not in repairs:
             raise ControlError("repair_paths must be unique and include fixture target")
 
-    payload_file = _confined(root, payload, "fixture.payload")
     scenario_directory = (root / SCENARIOS / scenario).resolve()
-    if not payload_file.resolve().is_relative_to(scenario_directory):
-        raise ControlError("fixture payload escapes its scenario directory")
-    if _sha256(payload_file.read_bytes()) != digest:
-        raise ControlError("payload does not match expectation content_sha256")
+    for entry in files:
+        payload_file = _confined(root, entry["payload"], "fixture.payload")
+        if not payload_file.resolve().is_relative_to(scenario_directory):
+            raise ControlError("fixture payload escapes its scenario directory")
+        if _sha256(payload_file.read_bytes()) != entry["content_sha256"]:
+            raise ControlError("payload does not match declared content_sha256")
     _confined(root, basis_path, "source_basis.path")
-    _confined(root, target, "fixture.target", allow_missing=True)
+    for target in targets:
+        _confined(root, target, "fixture.target", allow_missing=True)
+    if expectation_kind == "hero_review":
+        _run_fixture_validator(manifest, root, payloads)
     return manifest
+
+
+def _fixture_files(manifest: dict[str, Any]) -> list[dict[str, str]]:
+    fixture = manifest["fixture"]
+    if manifest["scenario"] == "hero-review":
+        return fixture["files"]
+    return [
+        {
+            "payload": fixture["payload"],
+            "target": fixture["target"],
+            "content_sha256": manifest["expectation"]["content_sha256"],
+        }
+    ]
+
+
+def _run_fixture_validator(
+    manifest: dict[str, Any], root: Path, paths: list[str] | None = None
+) -> None:
+    if manifest["expectation"]["kind"] != "hero_review":
+        return
+    validator = _confined(root, manifest["expectation"]["validator"], "expectation.validator")
+    selected = paths or [entry["target"] for entry in _fixture_files(manifest)]
+    inputs = [_confined(root, path, "validator input") for path in selected]
+    with tempfile.TemporaryDirectory(prefix="hero-review-validator-") as temporary:
+        confined = Path(temporary)
+        validator_copy = confined / "validate.py"
+        validator_copy.write_bytes(validator.read_bytes())
+        arguments: list[str] = []
+        for source in inputs:
+            copy = confined / source.name
+            copy.write_bytes(source.read_bytes())
+            arguments.append(str(copy))
+        try:
+            result = subprocess.run(
+                [sys.executable, "-I", "-S", str(validator_copy), *arguments],
+                cwd=confined,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+                check=False,
+                env={},
+            )
+        except subprocess.TimeoutExpired as error:
+            raise ControlError("hero fixture validator timed out") from error
+    if result.returncode:
+        raise ControlError("hero fixture validator failed")
 
 
 def _manifest_name(scenario: str) -> str:
@@ -256,26 +371,45 @@ def _manifest_name(scenario: str) -> str:
 
 def load_registry(root: Path = ROOT) -> dict[str, dict[str, Any]]:
     """Load every scenario and enforce registry-wide path and payload uniqueness."""
-    directory = root / SCENARIOS
+    directory = _confined(root, SCENARIOS.as_posix(), "scenario registry")
     try:
-        entries = sorted(item for item in directory.iterdir() if item.is_dir())
+        children = sorted(directory.iterdir())
     except OSError as error:
         raise ControlError(f"cannot read scenario registry: {error}") from error
+    if any(item.is_symlink() for item in children):
+        raise ControlError("scenario registry entries must not be symlinks")
+    entries = [item for item in children if item.is_dir()]
     manifests: dict[str, dict[str, Any]] = {}
     targets: set[str] = set()
+    payloads: set[str] = set()
     payload_digests: set[str] = set()
+    semantic_fingerprints: set[str] = set()
     for entry in entries:
-        path = entry / "scenario.json"
+        manifest_name = _manifest_name(entry.name)
+        path = _confined(root, manifest_name, "manifest path")
         manifest = validate_manifest(_read_json(path, "manifest"), entry.name, root)
-        admitted = manifest["fixture"]["admitted_changed_paths"]
-        aliases = targets.intersection(path for path in admitted if path != SELECTOR)
+        files = _fixture_files(manifest)
+        aliases = targets.intersection(entry["target"] for entry in files)
         if aliases:
             raise ControlError(f"duplicate admitted target path: {sorted(aliases)[0]}")
-        payload_digest = manifest["expectation"]["content_sha256"]
-        if payload_digest in payload_digests:
-            raise ControlError("scenario payloads must be genuinely distinct")
-        targets.update(path for path in admitted if path != SELECTOR)
-        payload_digests.add(payload_digest)
+        payload_aliases = payloads.intersection(entry["payload"] for entry in files)
+        if payload_aliases:
+            raise ControlError(f"duplicate payload path: {sorted(payload_aliases)[0]}")
+        digests = {entry["content_sha256"] for entry in files}
+        if len(digests) != len(files) or payload_digests.intersection(digests):
+            raise ControlError("scenario payload hashes must be genuinely distinct")
+        targets.update(entry["target"] for entry in files)
+        payloads.update(entry["payload"] for entry in files)
+        payload_digests.update(digests)
+        expectation = manifest["expectation"]
+        fingerprints: list[str] = []
+        if expectation["kind"] == "hero_review":
+            fingerprints = expectation["semantic_fingerprints"]
+        elif expectation["kind"] == "seeded_review_finding":
+            fingerprints = [expectation["semantic_fingerprint"]]
+        if semantic_fingerprints.intersection(fingerprints):
+            raise ControlError("semantic fingerprints must be registry-wide unique")
+        semantic_fingerprints.update(fingerprints)
         manifests[entry.name] = manifest
     if not manifests:
         raise ControlError("scenario registry is empty")
@@ -349,20 +483,50 @@ def _porcelain(root: Path) -> list[tuple[str, str]]:
     return sorted(set(paths))
 
 
+def _is_exact_prepared_status(
+    state: list[tuple[str, str]], target_names: list[str]
+) -> bool:
+    if not state:
+        return True
+    observed = {path: status for status, path in state}
+    if set(observed) not in (set(target_names), {SELECTOR, *target_names}):
+        return False
+    if any(observed.get(target) != "??" for target in target_names):
+        return False
+    return SELECTOR not in observed or observed[SELECTOR] == " M"
+
+
 def _observed_paths(root: Path) -> list[str]:
     return sorted({path for _, path in _porcelain(root)})
 
 
 def _identities(manifest: dict[str, Any], root: Path) -> tuple[str, str, str]:
-    payload = _confined(root, manifest["fixture"]["payload"], "fixture.payload").read_bytes()
+    files = _fixture_files(manifest)
+    payload_contents = [
+        (
+            entry["payload"],
+            _confined(root, entry["payload"], "fixture.payload").read_bytes(),
+        )
+        for entry in files
+    ]
     manifest_digest = _sha256(
         _confined(root, _manifest_name(manifest["scenario"]), "manifest path").read_bytes()
     )
-    payload_digest = _sha256(payload)
-    target = _confined(root, manifest["fixture"]["target"], "fixture.target", allow_missing=True)
     selector = _confined(root, SELECTOR, "selector")
-    target_bytes = target.read_bytes() if target.is_file() else b""
-    result_digest = _sha256(selector.read_bytes() + b"\0" + target_bytes)
+    if manifest["scenario"] != "hero-review":
+        target = _confined(root, files[0]["target"], "fixture.target", allow_missing=True)
+        target_bytes = target.read_bytes() if target.is_file() else b""
+        return (
+            manifest_digest,
+            _sha256(payload_contents[0][1]),
+            _sha256(selector.read_bytes() + b"\0" + target_bytes),
+        )
+    result_contents = [(SELECTOR, selector.read_bytes())]
+    for entry in files:
+        target = _confined(root, entry["target"], "fixture.target", allow_missing=True)
+        result_contents.append((entry["target"], target.read_bytes() if target.is_file() else b""))
+    payload_digest = _sha256(_framed_contents(payload_contents))
+    result_digest = _sha256(_framed_contents(result_contents))
     return manifest_digest, payload_digest, result_digest
 
 
@@ -393,35 +557,71 @@ def prepare(
     scenario, manifest = _select_manifest(manifest_path, scenario, root)
     head = observed_head(root)
     _verify_basis(manifest, root)
-    payload = _confined(root, manifest["fixture"]["payload"], "fixture.payload").read_bytes()
+    files = _fixture_files(manifest)
+    payloads = [
+        _confined(root, entry["payload"], "fixture.payload").read_bytes() for entry in files
+    ]
     admitted = manifest["fixture"]["admitted_changed_paths"]
-    target_name = manifest["fixture"]["target"]
-    target = _confined(root, target_name, "fixture.target", allow_missing=True)
+    targets = [
+        _confined(root, entry["target"], "fixture.target", allow_missing=True) for entry in files
+    ]
     selector = _confined(root, SELECTOR, "selector")
     selector_bytes = _selector(manifest)
     state = _porcelain(root)
-    admitted_states = [
-        [],
-        [("??", target_name)],
-        sorted([(" M", SELECTOR), ("??", target_name)]),
-    ]
-    if (
-        state in admitted_states
-        and selector.read_bytes() == selector_bytes
-        and target.is_file()
-        and target.read_bytes() == payload
-    ):
+    exact_prepared = (
+        selector.read_bytes() == selector_bytes
+        and all(target.is_file() for target in targets)
+        and all(target.read_bytes() == payload for target, payload in zip(targets, payloads))
+        and _is_exact_prepared_status(state, [entry["target"] for entry in files])
+    )
+    if exact_prepared:
+        _run_fixture_validator(manifest, root)
         changed = False
     else:
         if state:
             raise ControlError("worktree has dirty or unadmitted changes")
-        if target.exists():
+        if any(target.exists() for target in targets):
             raise ControlError("fixture target already exists")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        # Recheck after mkdir so races cannot redirect the write.
-        target = _confined(root, target_name, "fixture.target", allow_missing=True)
-        target.write_bytes(payload)
-        selector.write_bytes(selector_bytes)
+        selector_before = selector.read_bytes()
+        missing_directories: list[Path] = []
+        for target in targets:
+            parent = target.parent
+            while not parent.exists() and parent != root:
+                if parent not in missing_directories:
+                    missing_directories.append(parent)
+                parent = parent.parent
+        created_directories: list[Path] = []
+        created_targets: list[Path] = []
+        try:
+            for directory in reversed(missing_directories):
+                directory.mkdir()
+                created_directories.append(directory)
+            # Recheck after mkdir so races cannot redirect any write.
+            targets = [
+                _confined(root, entry["target"], "fixture.target", allow_missing=True)
+                for entry in files
+            ]
+            for target, payload in zip(targets, payloads):
+                try:
+                    with target.open("xb") as stream:
+                        created_targets.append(target)
+                        stream.write(payload)
+                except FileExistsError as error:
+                    raise ControlError("fixture target appeared during prepare") from error
+            _run_fixture_validator(manifest, root)
+            selector.write_bytes(selector_bytes)
+        except Exception:
+            for target in created_targets:
+                if target.is_file():
+                    target.unlink()
+            if selector.read_bytes() != selector_before:
+                selector.write_bytes(selector_before)
+            for directory in reversed(created_directories):
+                try:
+                    directory.rmdir()
+                except OSError:
+                    pass
+            raise
         changed = True
     manifest_digest, payload_digest, result_digest = _identities(manifest, root)
     return {
@@ -447,20 +647,25 @@ def inspect(
     _verify_basis(manifest, root)
     admitted = manifest["fixture"]["admitted_changed_paths"]
     observed = _observed_paths(root)
-    payload = _confined(root, manifest["fixture"]["payload"], "fixture.payload").read_bytes()
-    target = _confined(root, manifest["fixture"]["target"], "fixture.target", allow_missing=True)
+    files = _fixture_files(manifest)
+    payloads = [
+        _confined(root, entry["payload"], "fixture.payload").read_bytes() for entry in files
+    ]
+    targets = [
+        _confined(root, entry["target"], "fixture.target", allow_missing=True) for entry in files
+    ]
     selector_matches = _confined(root, SELECTOR, "selector").read_bytes() == _selector(manifest)
+    state = _porcelain(root)
     prepared = (
-        target.is_file()
-        and target.read_bytes() == payload
+        all(target.is_file() for target in targets)
+        and all(target.read_bytes() == payload for target, payload in zip(targets, payloads))
         and selector_matches
-        and _porcelain(root)
-        in [
-            [],
-            [("??", manifest["fixture"]["target"])],
-            sorted([(" M", SELECTOR), ("??", manifest["fixture"]["target"])])
-        ]
+        and _is_exact_prepared_status(state, [entry["target"] for entry in files])
     )
+    if prepared:
+        _run_fixture_validator(manifest, root)
+    elif state or any(target.exists() for target in targets):
+        raise ControlError("worktree is neither clean baseline nor exact prepared state")
     manifest_digest, payload_digest, result_digest = _identities(manifest, root)
     return {
         "schema_version": 1,
@@ -627,11 +832,13 @@ def main(argv: list[str] | None = None) -> int:
             selector = _confined(ROOT, SELECTOR, "selector")
             if selector.read_bytes() != _selector(manifest):
                 raise ControlError("active control does not exactly match selected manifest")
-            target = _confined(
-                ROOT, manifest["fixture"]["target"], "fixture.target", allow_missing=True
-            )
-            if not target.is_file():
+            targets = [
+                _confined(ROOT, entry["target"], "fixture.target", allow_missing=True)
+                for entry in _fixture_files(manifest)
+            ]
+            if not all(target.is_file() for target in targets):
                 raise ControlError("active scenario fixture target is missing")
+            _run_fixture_validator(manifest, ROOT)
             context = _github_context(head, required=True)
             if context["run_attempt"] != str(attempt):
                 raise ControlError("attempt must equal GITHUB_RUN_ATTEMPT")
