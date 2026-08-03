@@ -25,6 +25,7 @@ SCENARIOS = {
     "clean-green",
     "conversational-change",
     "first-attempt-flake",
+    "hero-review",
     "persistent-ci-regression",
     "seeded-review-finding",
 }
@@ -101,6 +102,14 @@ def test_legacy_control_admits_exact_persistent_failure() -> None:
 def test_prepare_is_exact_and_idempotent_and_inspect_is_repeatable(repository: Path) -> None:
     first = prepare("clean-green", repository)
     assert first["changed"] is True
+    assert (
+        first["payload_sha256"]
+        == "eeec6369b02c2e98207bdab8bff030d3e5332250de74d96320feeafb2509a27c"
+    )
+    assert (
+        first["result_sha256"]
+        == "a5fd9b3c80a76f65b2943bad06d7eda9b16c0451332cd0cc50d1524962cc41d2"
+    )
     target = repository / first["admitted_changed_paths"][1]
     assert target.read_bytes() == (
         repository / ".pr-lab/scenarios/clean-green/payload.py"
@@ -128,6 +137,166 @@ def test_prepare_is_exact_and_idempotent_and_inspect_is_repeatable(repository: P
     git(repository, "commit", "-qm", "prepared scenario")
     assert prepare("clean-green", repository)["changed"] is False
     assert inspect("clean-green", repository)["state"] == "prepared"
+
+
+def test_hero_prepare_is_multi_file_exact_idempotent_and_path_framed(repository: Path) -> None:
+    first = prepare("hero-review", repository)
+    assert first["changed"] is True
+    assert set(first["observed_changed_paths"]) == set(first["admitted_changed_paths"])
+    assert len(first["admitted_changed_paths"]) == 5
+    second = prepare("hero-review", repository)
+    observed = inspect("hero-review", repository)
+    assert second["changed"] is False
+    assert observed["state"] == "prepared"
+    assert second["payload_sha256"] == observed["payload_sha256"]
+    assert second["result_sha256"] == observed["result_sha256"]
+
+
+@pytest.mark.parametrize(
+    ("relative", "old", "new"),
+    [
+        ("gate.py", "timedelta(minutes=ttl_seconds)", "timedelta(seconds=ttl_seconds)"),
+        (
+            "gate.py",
+            "len(request.approvals) >= required",
+            "sum(request.approvals.values()) >= required",
+        ),
+        ("cache.py", "repository.casefold()", "repository"),
+        (
+            "cache.py",
+            'f"{repository}#{request_number}"',
+            'f"{repository.casefold()}#{request_number}"',
+        ),
+    ],
+)
+def test_hero_validator_rejects_each_fixed_defect_anchor(
+    repository: Path, relative: str, old: str, new: str
+) -> None:
+    prepared = prepare("hero-review", repository)
+    target = repository / "scenario-fixtures/hero_review" / relative
+    source = target.read_text()
+    assert source.count(old) == 1
+    target.write_text(source.replace(old, new))
+    inputs = [repository / path for path in prepared["admitted_changed_paths"][1:]]
+    result = subprocess.run(
+        [
+            sys.executable,
+            ".pr-lab/scenarios/hero-review/validate.py",
+            *(str(path) for path in inputs),
+        ],
+        cwd=repository,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+
+
+@pytest.mark.parametrize(
+    ("relative", "old", "new"),
+    [
+        ("gate.py", "timedelta(minutes=ttl_seconds)", "timedelta(seconds=ttl_seconds)"),
+        (
+            "gate.py",
+            "len(request.approvals) >= required",
+            "sum(request.approvals.values()) >= required",
+        ),
+        ("cache.py", "repository.casefold()", "repository"),
+        (
+            "cache.py",
+            'f"{repository}#{request_number}"',
+            'f"{repository.casefold()}#{request_number}"',
+        ),
+    ],
+)
+def test_hero_validator_rejects_fixed_function_with_anchor_moved_to_decoy(
+    repository: Path, relative: str, old: str, new: str
+) -> None:
+    prepared = prepare("hero-review", repository)
+    target = repository / "scenario-fixtures/hero_review" / relative
+    source = target.read_text()
+    anchor = next(line for line in source.splitlines() if old in line)
+    target.write_text(source.replace(old, new) + f"\n\ndef decoy():\n{anchor}\n")
+    inputs = [repository / path for path in prepared["admitted_changed_paths"][1:]]
+    result = subprocess.run(
+        [
+            sys.executable,
+            ".pr-lab/scenarios/hero-review/validate.py",
+            *(str(path) for path in inputs),
+        ],
+        cwd=repository,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+
+
+def test_hero_prepare_rolls_back_partial_target_write(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    selector = repository / ".pr-lab/scenario.json"
+    selector_before = selector.read_bytes()
+    original_open = Path.open
+
+    def fail_on_models(path: Path, mode: str = "r", *args, **kwargs):
+        if path == repository / "scenario-fixtures/hero_review/models.py" and mode == "xb":
+            raise OSError("injected target write failure")
+        return original_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", fail_on_models)
+    with pytest.raises(OSError, match="injected target"):
+        prepare("hero-review", repository)
+    assert selector.read_bytes() == selector_before
+    assert not (repository / "scenario-fixtures").exists()
+
+
+def test_hero_prepare_preserves_target_that_appears_during_publication(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    selector = repository / ".pr-lab/scenario.json"
+    selector_before = selector.read_bytes()
+    appeared = repository / "scenario-fixtures/hero_review/models.py"
+    original_open = Path.open
+    injected = False
+
+    def inject_models(path: Path, mode: str = "r", *args, **kwargs):
+        nonlocal injected
+        if path == appeared and mode == "xb" and not injected:
+            injected = True
+            with original_open(path, "xb") as stream:
+                stream.write(b"external\n")
+        return original_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", inject_models)
+    with pytest.raises(ControlError, match="appeared"):
+        prepare("hero-review", repository)
+    assert selector.read_bytes() == selector_before
+    assert appeared.read_bytes() == b"external\n"
+    assert not (repository / "scenario-fixtures/hero_review/__init__.py").exists()
+
+
+def test_hero_prepare_rolls_back_selector_publication(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    selector = repository / ".pr-lab/scenario.json"
+    selector_before = selector.read_bytes()
+    original_write = Path.write_bytes
+    failed = False
+
+    def fail_after_selector_write(path: Path, content: bytes) -> int:
+        nonlocal failed
+        written = original_write(path, content)
+        if path == selector and content != selector_before and not failed:
+            failed = True
+            raise OSError("injected selector write failure")
+        return written
+
+    monkeypatch.setattr(Path, "write_bytes", fail_after_selector_write)
+    with pytest.raises(OSError, match="injected selector"):
+        prepare("hero-review", repository)
+    assert selector.read_bytes() == selector_before
+    assert not (repository / "scenario-fixtures").exists()
 
 
 @pytest.mark.parametrize("scenario", sorted(SCENARIOS))
@@ -171,8 +340,9 @@ def test_every_prepared_scenario_executes_its_fixture_contract(
     assert repaired.returncode == 0, repaired.stdout + repaired.stderr
 
 
+@pytest.mark.parametrize("scenario", ["clean-green", "hero-review"])
 def test_prepare_refuses_symlinked_target_parent_without_outside_write(
-    repository: Path, tmp_path: Path
+    repository: Path, tmp_path: Path, scenario: str
 ) -> None:
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -180,8 +350,55 @@ def test_prepare_refuses_symlinked_target_parent_without_outside_write(
     remove_path(target_parent)
     target_parent.symlink_to(outside, target_is_directory=True)
     with pytest.raises(ControlError, match="symlink"):
-        prepare("clean-green", repository)
+        prepare(scenario, repository)
     assert list(outside.iterdir()) == []
+
+
+def test_hero_prepare_rejects_partial_state_before_writing_any_other_path(
+    repository: Path,
+) -> None:
+    manifest = json.loads((repository / ".pr-lab/scenarios/hero-review/scenario.json").read_text())
+    first = manifest["fixture"]["files"][0]
+    target = repository / first["target"]
+    target.parent.mkdir(parents=True)
+    target.write_bytes((repository / first["payload"]).read_bytes())
+    selector_before = (repository / ".pr-lab/scenario.json").read_bytes()
+
+    with pytest.raises(ControlError, match="dirty"):
+        prepare("hero-review", repository)
+
+    assert (repository / ".pr-lab/scenario.json").read_bytes() == selector_before
+    assert all(
+        not (repository / entry["target"]).exists()
+        for entry in manifest["fixture"]["files"][1:]
+    )
+
+
+def test_hero_prepare_and_inspect_reject_staged_mixed_and_unrelated_states(
+    repository: Path,
+) -> None:
+    prepared = prepare("hero-review", repository)
+    first_target = prepared["admitted_changed_paths"][1]
+    git(repository, "add", first_target)
+    with pytest.raises(ControlError, match="dirty"):
+        prepare("hero-review", repository)
+    with pytest.raises(ControlError, match="neither clean baseline"):
+        inspect("hero-review", repository)
+
+    git(repository, "reset", "-q")
+    target = repository / first_target
+    target.write_text(target.read_text().replace("Release approval", "Deployment approval"))
+    with pytest.raises(ControlError, match="dirty"):
+        prepare("hero-review", repository)
+    with pytest.raises(ControlError, match="neither clean baseline"):
+        inspect("hero-review", repository)
+
+    remove_path(repository / "scenario-fixtures")
+    baseline_selector = (ROOT / ".pr-lab/scenario.json").read_bytes()
+    (repository / ".pr-lab/scenario.json").write_bytes(baseline_selector)
+    (repository / "unrelated.txt").write_text("dirty")
+    with pytest.raises(ControlError, match="neither clean baseline"):
+        inspect("hero-review", repository)
 
 
 def test_prepare_refuses_dirty_preexisting_and_wrong_basis(repository: Path) -> None:
@@ -197,6 +414,11 @@ def test_prepare_refuses_dirty_preexisting_and_wrong_basis(repository: Path) -> 
     git(repository, "commit", "-qm", "pre-existing target")
     with pytest.raises(ControlError, match="already exists"):
         prepare("clean-green", repository)
+    target.write_bytes((repository / ".pr-lab/scenarios/clean-green/payload.py").read_bytes())
+    with pytest.raises(ControlError, match="dirty"):
+        prepare("clean-green", repository)
+    with pytest.raises(ControlError, match="neither clean baseline"):
+        inspect("clean-green", repository)
     target.unlink()
     git(repository, "add", "scenario-fixtures/clean_green.py")
     git(repository, "commit", "-qm", "remove pre-existing target")
@@ -327,6 +549,61 @@ def test_registry_rejects_invalid_schema_and_scenario_target_aliasing(repository
         load_registry(repository)
 
 
+def test_hero_manifest_keeps_files_fingerprints_and_validator_closed(repository: Path) -> None:
+    manifest_path = repository / ".pr-lab/scenarios/hero-review/scenario.json"
+    original = json.loads(manifest_path.read_text())
+
+    invalid = json.loads(json.dumps(original))
+    invalid["fixture"]["files"][0]["extra"] = True
+    manifest_path.write_text(json.dumps(invalid))
+    with pytest.raises(ControlError, match=r"fixture.files\[0\] fields"):
+        load_registry(repository)
+
+    invalid = json.loads(json.dumps(original))
+    invalid["fixture"]["admitted_changed_paths"][1:3] = reversed(
+        invalid["fixture"]["admitted_changed_paths"][1:3]
+    )
+    manifest_path.write_text(json.dumps(invalid))
+    with pytest.raises(ControlError, match="ordered targets"):
+        load_registry(repository)
+
+    invalid = json.loads(json.dumps(original))
+    invalid["fixture"]["files"][0]["content_sha256"] = "0" * 64
+    manifest_path.write_text(json.dumps(invalid))
+    with pytest.raises(ControlError, match="declared content_sha256"):
+        load_registry(repository)
+
+    invalid = json.loads(json.dumps(original))
+    invalid["expectation"]["semantic_fingerprints"] = ["hero-review:f01"]
+    manifest_path.write_text(json.dumps(invalid))
+    with pytest.raises(ControlError, match="exactly three"):
+        load_registry(repository)
+
+    invalid = json.loads(json.dumps(original))
+    invalid["expectation"]["validator"] = "tools/scenario_control.py"
+    manifest_path.write_text(json.dumps(invalid))
+    with pytest.raises(ControlError, match="confined"):
+        load_registry(repository)
+
+
+def test_registry_rejects_symlinked_scenario_and_manifest_before_read(
+    repository: Path, tmp_path: Path
+) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    scenarios = repository / ".pr-lab/scenarios"
+    (scenarios / "linked-scenario").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ControlError, match="must not be symlinks"):
+        load_registry(repository)
+    (scenarios / "linked-scenario").unlink()
+
+    manifest = scenarios / "clean-green/scenario.json"
+    manifest.unlink()
+    manifest.symlink_to(repository / "README.md")
+    with pytest.raises(ControlError, match="symlink"):
+        load_registry(repository)
+
+
 def test_evidence_refuses_escape_and_symlink_parent(repository: Path, tmp_path: Path) -> None:
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -372,13 +649,13 @@ def test_evaluate_rejects_head_context_that_does_not_match_observed_head() -> No
     assert "does not equal observed_head" in json.loads(result.stdout)["error"]
 
 
-def test_explicit_manifest_must_be_canonical() -> None:
+def test_explicit_manifest_must_be_canonical(repository: Path) -> None:
     approved = subprocess.run(
         [
             "python", "tools/scenario_control.py", "inspect", "--manifest",
             ".pr-lab/scenarios/clean-green/scenario.json", "--json",
         ],
-        cwd=ROOT,
+        cwd=repository,
         check=False,
         capture_output=True,
     )
@@ -386,7 +663,7 @@ def test_explicit_manifest_must_be_canonical() -> None:
     assert json.loads(approved.stdout)["valid"] is True
     rejected = subprocess.run(
         ["python", "tools/scenario_control.py", "validate", "--manifest", "README.md"],
-        cwd=ROOT,
+        cwd=repository,
         check=False,
         capture_output=True,
     )
