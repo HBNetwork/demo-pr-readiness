@@ -23,6 +23,6 @@
     "kind": "hero_review",
     "semantic_fingerprints": ["hero-review:f01", "hero-review:f02", "hero-review:f03"],
     "validator": ".pr-lab/scenarios/hero-review/validate.py",
-    "validator_sha256": "4c81e98c1b590a8d83ec569cade4cea6542575e38e24b34a42548ea9cae83b97"
+    "validator_sha256": "9951879d38827917cbee341cce0436b786985e5e6f67155b0cbf8670e9937024"
   }
 }

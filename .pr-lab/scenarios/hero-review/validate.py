@@ -7,10 +7,13 @@ import sys
 from pathlib import Path
 
 EXPECTED_NAMES = ("__init__.py", "models.py", "gate.py", "cache.py")
-SUGGESTION_ANCHOR = "    return issued_at + timedelta(minutes=ttl_seconds)"
-POLICY_ANCHOR = "    return len(request.approvals) >= required"
+SEEDED_SUGGESTION_ANCHOR = "    return issued_at + timedelta(minutes=ttl_seconds)"
+REPAIRED_SUGGESTION_ANCHOR = "    return issued_at + timedelta(seconds=ttl_seconds)"
+SEEDED_POLICY_ANCHOR = "    return len(request.approvals) >= required"
+REPAIRED_POLICY_ANCHOR = "    return sum(request.approvals.values()) >= required"
 STORE_ANCHOR = '    return f"{repository.casefold()}#{request_number}"'
-LOOKUP_ANCHOR = '    return f"{repository}#{request_number}"'
+SEEDED_LOOKUP_ANCHOR = '    return f"{repository}#{request_number}"'
+REPAIRED_LOOKUP_ANCHOR = STORE_ANCHOR
 MODEL_ANCHORS = (
     "class Risk(StrEnum):",
     '    NORMAL = "normal"',
@@ -32,7 +35,7 @@ def unique_line(source: str, anchor: str, label: str) -> int:
     return matches[0]
 
 
-def require_return(tree: ast.Module, function_name: str, line: int) -> ast.Return:
+def require_return(tree: ast.Module, function_name: str) -> ast.Return:
     functions = [
         node
         for node in tree.body
@@ -41,12 +44,15 @@ def require_return(tree: ast.Module, function_name: str, line: int) -> ast.Retur
     if len(functions) != 1:
         fail(f"{function_name} must be one top-level function")
     returns = [node for node in ast.walk(functions[0]) if isinstance(node, ast.Return)]
-    if len(returns) != 1 or returns[0].lineno != line:
-        fail(f"{function_name} must own its anchored return")
+    if len(returns) != 1:
+        fail(f"{function_name} must own one return")
     return returns[0]
 
 
 def main(arguments: list[str]) -> None:
+    allow_repaired = arguments[:1] == ["--allow-repaired"]
+    if allow_repaired:
+        arguments = arguments[1:]
     if len(arguments) != len(EXPECTED_NAMES):
         fail("validator requires the complete ordered hero payload")
     paths = [Path(value) for value in arguments]
@@ -62,12 +68,12 @@ def main(arguments: list[str]) -> None:
         sources[path.name] = source
 
     gate = sources["gate.py"]
-    suggestion_line = unique_line(gate, SUGGESTION_ANCHOR, "suggestion")
-    policy_line = unique_line(gate, POLICY_ANCHOR, "policy")
     tree = ast.parse(gate)
-    suggestion_return = require_return(tree, "lease_deadline", suggestion_line)
-    require_return(tree, "can_release", policy_line)
-    if suggestion_return.end_lineno != suggestion_line:
+    suggestion_return = require_return(tree, "lease_deadline")
+    policy_return = require_return(tree, "can_release")
+    suggestion_line = gate.splitlines()[suggestion_return.lineno - 1]
+    policy_line = gate.splitlines()[policy_return.lineno - 1]
+    if suggestion_return.end_lineno != suggestion_return.lineno:
         fail("suggestion anchor must be exactly one line")
 
     models = sources["models.py"]
@@ -75,13 +81,28 @@ def main(arguments: list[str]) -> None:
         unique_line(models, anchor, "model contract")
 
     cache = sources["cache.py"]
-    store_line = unique_line(cache, STORE_ANCHOR, "store invariant")
-    lookup_line = unique_line(cache, LOOKUP_ANCHOR, "lookup invariant")
-    if store_line == lookup_line or abs(store_line - lookup_line) <= 1:
-        fail("invariant anchors must be distinct and non-adjacent")
     cache_tree = ast.parse(cache)
-    require_return(cache_tree, "store_key", store_line)
-    require_return(cache_tree, "lookup_key", lookup_line)
+    store_return = require_return(cache_tree, "store_key")
+    lookup_return = require_return(cache_tree, "lookup_key")
+    store_anchor = cache.splitlines()[store_return.lineno - 1]
+    lookup_anchor = cache.splitlines()[lookup_return.lineno - 1]
+    if abs(store_return.lineno - lookup_return.lineno) <= 1:
+        fail("invariant anchors must be distinct and non-adjacent")
+
+    seeded = (
+        suggestion_line == SEEDED_SUGGESTION_ANCHOR
+        and policy_line == SEEDED_POLICY_ANCHOR
+        and store_anchor == STORE_ANCHOR
+        and lookup_anchor == SEEDED_LOOKUP_ANCHOR
+    )
+    repaired = (
+        suggestion_line == REPAIRED_SUGGESTION_ANCHOR
+        and policy_line == REPAIRED_POLICY_ANCHOR
+        and store_anchor == STORE_ANCHOR
+        and lookup_anchor == REPAIRED_LOOKUP_ANCHOR
+    )
+    if not seeded and (not allow_repaired or not repaired):
+        fail("hero payload must be exactly seeded or, when allowed, fully repaired")
 
 
 if __name__ == "__main__":

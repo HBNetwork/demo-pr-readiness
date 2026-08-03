@@ -192,6 +192,45 @@ def test_hero_validator_rejects_each_fixed_defect_anchor(
     assert result.returncode != 0
 
 
+def test_hero_validator_accepts_only_the_complete_repaired_state(repository: Path) -> None:
+    prepared = prepare("hero-review", repository)
+    gate = repository / "scenario-fixtures/hero_review/gate.py"
+    gate.write_text(
+        gate.read_text()
+        .replace("timedelta(minutes=ttl_seconds)", "timedelta(seconds=ttl_seconds)")
+        .replace(
+            "len(request.approvals) >= required",
+            "sum(request.approvals.values()) >= required",
+        )
+    )
+    cache = repository / "scenario-fixtures/hero_review/cache.py"
+    cache.write_text(
+        cache.read_text().replace(
+            'return f"{repository}#{request_number}"',
+            'return f"{repository.casefold()}#{request_number}"',
+        )
+    )
+    inputs = [repository / path for path in prepared["admitted_changed_paths"][1:]]
+    command = [
+        sys.executable,
+        ".pr-lab/scenarios/hero-review/validate.py",
+        "--allow-repaired",
+        *(str(path) for path in inputs),
+    ]
+    complete = subprocess.run(command, cwd=repository, check=False, capture_output=True)
+    assert complete.returncode == 0
+
+    cache.write_text(
+        cache.read_text().replace(
+            'return f"{repository.casefold()}#{request_number}"',
+            'return f"{repository}#{request_number}"',
+            1,
+        )
+    )
+    partial = subprocess.run(command, cwd=repository, check=False, capture_output=True)
+    assert partial.returncode != 0
+
+
 @pytest.mark.parametrize(
     ("relative", "old", "new"),
     [
