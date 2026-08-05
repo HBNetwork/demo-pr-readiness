@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "scenario": "clean-green",
+  "scenario": "repairable-regression",
   "behavior": {
     "kind": "pass"
   },
