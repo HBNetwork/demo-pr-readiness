@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "record_owner": "Ariad",
+  "scenario": "persistent-ci-regression",
+  "status": "incomplete",
+  "disposition": "blocking_scenario_preserved_without_merge",
+  "finding": {
+    "id": "IMP-25-001",
+    "state": "still_open",
+    "summary": "Persistent failure blocks every required CI check"
+  },
+  "source_review": {
+    "pull_request": 25,
+    "head": "bf68155f26c913106d21fcd1dbcd90e75bac9834",
+    "branch": "hamsterdan/cv3-retry-persistent-ci-regression-20260802002000",
+    "workflow_run": 30725048493,
+    "attempt": 4,
+    "scenario_control": "failure",
+    "dependent_checks": [
+      "lint: skipped",
+      "type: skipped",
+      "unit: skipped",
+      "build: skipped",
+      "integration: skipped"
+    ]
+  },
+  "reason": "The active selector uses persistent_failure, so scenario-control exits 1 on every attempt and all dependent checks remain blocked.",
+  "future_remediation": [
+    "Restore .pr-lab/scenario.json to the passing clean-green selector.",
+    "Remove the generated scenario-fixtures/persistent_ci_regression.py file.",
+    "Retain .pr-lab/scenarios/persistent-ci-regression/scenario.json and payload.py as the dormant deterministic test scenario.",
+    "Run scenario-control, lint, type, unit, build, and integration checks; accept production changes only after every required check passes."
+  ],
+  "integration": {
+    "accepted": [],
+    "excluded": [
+      ".pr-lab/scenario.json persistent_failure activation",
+      "scenario-fixtures/persistent_ci_regression.py generated fixture"
+    ],
+    "generated_residue_preserved": false
+  }
+}
