@@ -3,7 +3,7 @@
   "scenario": "conversational-change",
   "behavior": {"kind": "pass"},
   "review_lenses": ["correctness", "test-quality", "risk"],
-  "source_basis": {"path": "src/pr_fixture/readiness.py", "sha256": "2beb15361677cfdfc7ae22dc326dbf27dfaee2df90bd02e78acab1434873be3f"},
-  "fixture": {"payload": ".pr-lab/scenarios/conversational-change/payload.py", "target": "scenario-fixtures/conversational_change.py", "admitted_changed_paths": [".pr-lab/scenario.json", "scenario-fixtures/conversational_change.py"]},
-  "expectation": {"kind": "conversational_instruction", "target": "scenario-fixtures/conversational_change.py", "content_sha256": "1d053615077629dddc1050fe1f9c6d095094ad86767de355d27380ad419a2d09", "instruction": "Add a deterministic release-readiness example to README.md."}
+  "source_basis": {"path": "src/pr_fixture/readiness.py", "sha256": "e9e710c26956df7c0fa41d5847d0ef5ae6f1d3a066a85fb71d8460db08d1582d"},
+  "fixture": {"payload": ".pr-lab/scenarios/conversational-change/payload.py", "target": "scenario-fixtures/conversational_change.py", "admitted_changed_paths": [".pr-lab/scenario.json", "scenario-fixtures/conversational_change.py", "README.md"]},
+  "expectation": {"kind": "conversational_instruction", "target": "scenario-fixtures/conversational_change.py", "content_sha256": "1d053615077629dddc1050fe1f9c6d095094ad86767de355d27380ad419a2d09", "instruction": "Append exactly these UTF-8 bytes to README.md, including the leading newline, blank line between heading and paragraph, and final newline: `\n## Deterministic release-readiness example\n\nA pull request is ready for release when it is not a draft, has at least one approval, has green checks, and is mergeable.\n`", "instruction_paths": ["README.md"], "instruction_source_sha256": "3952d64d7cc1d7d10ebb32baae323d71fe1eeebeae7e6d3af3f902d3253ae3cb", "instruction_result_sha256": "524e317e5e8d09d00deb57086148da112904c7e6d7ab47efaaa48382455b6b08"}
 }

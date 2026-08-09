@@ -15,6 +15,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
         with:
           python-version: '3.12'
@@ -24,6 +25,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          rm -f .pr-lab/evidence/scenario-control.json
           if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- .pr-lab/scenario.json scenario-fixtures; then
             python tools/scenario_control.py --attempt "$GITHUB_RUN_ATTEMPT"
           else
@@ -40,11 +42,24 @@ jobs:
 
   lint:
     needs: scenario-control
+    if: >-
+      ${{
+        always() &&
+        !cancelled() &&
+        (
+          needs.scenario-control.result == 'success' ||
+          (
+            needs.scenario-control.result == 'skipped' &&
+            github.event.pull_request.head.repo.id != github.event.repository.id
+          )
+        )
+      }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
         with:
           python-version: '3.12'
@@ -52,11 +67,24 @@ jobs:
       - run: uv run --frozen ruff check .
   type:
     needs: scenario-control
+    if: >-
+      ${{
+        always() &&
+        !cancelled() &&
+        (
+          needs.scenario-control.result == 'success' ||
+          (
+            needs.scenario-control.result == 'skipped' &&
+            github.event.pull_request.head.repo.id != github.event.repository.id
+          )
+        )
+      }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
         with:
           python-version: '3.12'
@@ -64,11 +92,24 @@ jobs:
       - run: uv run --frozen ty check
   unit:
     needs: scenario-control
+    if: >-
+      ${{
+        always() &&
+        !cancelled() &&
+        (
+          needs.scenario-control.result == 'success' ||
+          (
+            needs.scenario-control.result == 'skipped' &&
+            github.event.pull_request.head.repo.id != github.event.repository.id
+          )
+        )
+      }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
         with:
           python-version: '3.12'
@@ -76,11 +117,24 @@ jobs:
       - run: uv run --frozen pytest tests/unit
   build:
     needs: scenario-control
+    if: >-
+      ${{
+        always() &&
+        !cancelled() &&
+        (
+          needs.scenario-control.result == 'success' ||
+          (
+            needs.scenario-control.result == 'skipped' &&
+            github.event.pull_request.head.repo.id != github.event.repository.id
+          )
+        )
+      }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
         with:
           python-version: '3.12'
@@ -97,6 +151,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
         with:
           python-version: '3.12'

@@ -3,7 +3,7 @@
   "scenario": "persistent-ci-regression",
   "behavior": {"kind": "persistent_failure", "fingerprint": "scenario:persistent-ci-regression:v1"},
   "review_lenses": ["correctness", "test-quality", "risk"],
-  "source_basis": {"path": "src/pr_fixture/readiness.py", "sha256": "2beb15361677cfdfc7ae22dc326dbf27dfaee2df90bd02e78acab1434873be3f"},
+  "source_basis": {"path": "src/pr_fixture/readiness.py", "sha256": "e9e710c26956df7c0fa41d5847d0ef5ae6f1d3a066a85fb71d8460db08d1582d"},
   "fixture": {"payload": ".pr-lab/scenarios/persistent-ci-regression/payload.py", "target": "scenario-fixtures/persistent_ci_regression.py", "admitted_changed_paths": [".pr-lab/scenario.json", "scenario-fixtures/persistent_ci_regression.py"]},
   "expectation": {"kind": "content", "target": "scenario-fixtures/persistent_ci_regression.py", "content_sha256": "ab95eac2565e92ec31a069bf6ee7ef5da495b627794f02560d6535b90c234b3d"}
 }
