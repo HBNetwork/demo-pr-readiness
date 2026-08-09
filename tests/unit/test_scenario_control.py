@@ -29,6 +29,11 @@ SCENARIOS = {
     "persistent-ci-regression",
     "seeded-review-finding",
 }
+CONVERSATIONAL_README_ADDITION = (
+    b"\n## Deterministic release-readiness example\n\n"
+    b"A pull request is ready for release when it is not a draft, has at least one approval, "
+    b"has green checks, and is mergeable.\n"
+)
 
 
 def git(root: Path, *arguments: str) -> None:
@@ -139,6 +144,45 @@ def test_prepare_is_exact_and_idempotent_and_inspect_is_repeatable(repository: P
     assert inspect("clean-green", repository)["state"] == "prepared"
 
 
+def test_conversational_prepare_preserves_and_then_admits_readme(repository: Path) -> None:
+    readme = repository / "README.md"
+    before = readme.read_bytes()
+    prepared = prepare("conversational-change", repository)
+    assert readme.read_bytes() == before
+    assert prepared["observed_changed_paths"] == [
+        ".pr-lab/scenario.json",
+        "scenario-fixtures/conversational_change.py",
+    ]
+    assert prepared["admitted_changed_paths"] == [
+        ".pr-lab/scenario.json",
+        "scenario-fixtures/conversational_change.py",
+        "README.md",
+    ]
+
+    readme.write_bytes(before + b"\nUnrelated documentation change.\n")
+    with pytest.raises(ControlError, match="source or result"):
+        inspect("conversational-change", repository)
+    readme.write_bytes(before + CONVERSATIONAL_README_ADDITION)
+    assert inspect("conversational-change", repository)["state"] == "instructed"
+    with pytest.raises(ControlError, match="already completed"):
+        prepare("conversational-change", repository)
+
+
+def test_conversational_prepare_refuses_an_already_instructed_baseline(repository: Path) -> None:
+    readme = repository / "README.md"
+    readme.write_bytes(readme.read_bytes() + CONVERSATIONAL_README_ADDITION)
+    git(repository, "add", "README.md")
+    git(repository, "commit", "-qm", "pre-existing instruction result")
+    selector = repository / ".pr-lab/scenario.json"
+    selector_before = selector.read_bytes()
+
+    with pytest.raises(ControlError, match="already completed"):
+        prepare("conversational-change", repository)
+
+    assert selector.read_bytes() == selector_before
+    assert not (repository / "scenario-fixtures").exists()
+
+
 def test_hero_prepare_is_multi_file_exact_idempotent_and_path_framed(repository: Path) -> None:
     first = prepare("hero-review", repository)
     assert first["changed"] is True
@@ -219,6 +263,7 @@ def test_hero_validator_accepts_only_the_complete_repaired_state(repository: Pat
     ]
     complete = subprocess.run(command, cwd=repository, check=False, capture_output=True)
     assert complete.returncode == 0
+    assert inspect("hero-review", repository)["state"] == "repaired"
 
     cache.write_text(
         cache.read_text().replace(
@@ -229,6 +274,8 @@ def test_hero_validator_accepts_only_the_complete_repaired_state(repository: Pat
     )
     partial = subprocess.run(command, cwd=repository, check=False, capture_output=True)
     assert partial.returncode != 0
+    with pytest.raises(ControlError, match="not admitted"):
+        inspect("hero-review", repository)
 
 
 @pytest.mark.parametrize(
@@ -364,6 +411,7 @@ def test_every_prepared_scenario_executes_its_fixture_contract(
     assert "test_agent_repair_high_risk_threshold" in first.stdout
     before_paths = set(result["observed_changed_paths"])
     target.write_text(target.read_text().replace("return 1", "return 2"))
+    assert inspect("agent-repair", repository)["state"] == "repaired"
     after_paths = {
         line[3:]
         for line in subprocess.run(
@@ -429,7 +477,7 @@ def test_hero_prepare_and_inspect_reject_staged_mixed_and_unrelated_states(
     target.write_text(target.read_text().replace("Release approval", "Deployment approval"))
     with pytest.raises(ControlError, match="dirty"):
         prepare("hero-review", repository)
-    with pytest.raises(ControlError, match="neither clean baseline"):
+    with pytest.raises(ControlError, match="not admitted"):
         inspect("hero-review", repository)
 
     remove_path(repository / "scenario-fixtures")
@@ -484,6 +532,8 @@ def test_evaluate_cli_writes_exact_bounded_evidence_shape(repository: Path) -> N
     ).stdout.strip()
     prepared = prepare("conversational-change", repository)
     admitted_changed_paths = prepared["admitted_changed_paths"]
+    with (repository / "README.md").open("ab") as stream:
+        stream.write(CONVERSATIONAL_README_ADDITION)
     git(repository, "add", *admitted_changed_paths)
     git(repository, "commit", "-qm", "prepare conversational-change")
     head_sha = subprocess.run(
@@ -537,8 +587,62 @@ def test_evaluate_cli_writes_exact_bounded_evidence_shape(repository: Path) -> N
     }
     assert value["expected_result"] == value["observed_result"] == "pass"
     assert value["admitted_changed_paths"] == admitted_changed_paths
-    assert value["observed_changed_paths"] == admitted_changed_paths
+    assert value["observed_changed_paths"] == sorted(admitted_changed_paths)
     assert len(evidence.read_bytes()) < 4096
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "clean-green",
+        "conversational-change",
+        "first-attempt-flake",
+        "persistent-ci-regression",
+        "seeded-review-finding",
+    ],
+)
+def test_ci_evidence_rejects_mutated_immutable_fixture(
+    repository: Path, scenario: str
+) -> None:
+    base_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repository, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    prepared = prepare(scenario, repository)
+    target = repository / prepared["admitted_changed_paths"][1]
+    target.write_bytes(target.read_bytes() + b"\n# mutation\n")
+    if scenario == "conversational-change":
+        with (repository / "README.md").open("ab") as stream:
+            stream.write(CONVERSATIONAL_README_ADDITION)
+    git(repository, "add", *prepared["admitted_changed_paths"])
+    git(repository, "commit", "-qm", f"mutate {scenario}")
+    head_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repository, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    result = subprocess.run(
+        [
+            sys.executable,
+            "tools/scenario_control.py",
+            "evaluate",
+            "--attempt",
+            "1",
+            "--evidence",
+            ".pr-lab/evidence/scenario-control.json",
+        ],
+        cwd=repository,
+        env={
+            **os.environ,
+            "GITHUB_REPOSITORY": "HBNetwork/demo-pr-readiness",
+            "PR_NUMBER": "17",
+            "BASE_SHA": base_sha,
+            "HEAD_SHA": head_sha,
+            "GITHUB_RUN_ID": "12345",
+            "GITHUB_RUN_ATTEMPT": "1",
+        },
+        check=False,
+        capture_output=True,
+    )
+    assert result.returncode == 2
+    assert "fixture content is not admitted" in json.loads(result.stdout)["error"]
 
 
 @pytest.mark.parametrize("scenario", sorted(SCENARIOS))
@@ -622,6 +726,39 @@ def test_hero_manifest_keeps_files_fingerprints_and_validator_closed(repository:
     invalid["expectation"]["validator"] = "tools/scenario_control.py"
     manifest_path.write_text(json.dumps(invalid))
     with pytest.raises(ControlError, match="confined"):
+        load_registry(repository)
+
+
+def test_conversational_manifest_binds_instruction_and_admitted_paths(repository: Path) -> None:
+    manifest_path = repository / ".pr-lab/scenarios/conversational-change/scenario.json"
+    original = json.loads(manifest_path.read_text())
+
+    invalid = json.loads(json.dumps(original))
+    invalid["fixture"]["admitted_changed_paths"].remove("README.md")
+    manifest_path.write_text(json.dumps(invalid))
+    with pytest.raises(ControlError, match="mutation paths"):
+        load_registry(repository)
+
+    invalid = json.loads(json.dumps(original))
+    invalid["expectation"]["instruction_paths"] = ["README.md", "README.md"]
+    manifest_path.write_text(json.dumps(invalid))
+    with pytest.raises(ControlError, match="exactly one"):
+        load_registry(repository)
+
+    invalid = json.loads(json.dumps(original))
+    invalid["expectation"]["instruction_paths"] = ["../README.md"]
+    manifest_path.write_text(json.dumps(invalid))
+    with pytest.raises(ControlError, match="normalized"):
+        load_registry(repository)
+
+
+def test_agent_repair_manifest_rejects_unpinned_extra_repair_path(repository: Path) -> None:
+    manifest_path = repository / ".pr-lab/scenarios/agent-repair/scenario.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["expectation"]["repair_paths"].append("README.md")
+    manifest["fixture"]["admitted_changed_paths"].append("README.md")
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(ControlError, match="only the pinned fixture target"):
         load_registry(repository)
 
 

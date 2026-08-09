@@ -3,13 +3,13 @@
   "scenario": "hero-review",
   "behavior": {"kind": "pass"},
   "review_lenses": ["correctness", "test-quality", "risk"],
-  "source_basis": {"path": "src/pr_fixture/readiness.py", "sha256": "2beb15361677cfdfc7ae22dc326dbf27dfaee2df90bd02e78acab1434873be3f"},
+  "source_basis": {"path": "src/pr_fixture/readiness.py", "sha256": "e9e710c26956df7c0fa41d5847d0ef5ae6f1d3a066a85fb71d8460db08d1582d"},
   "fixture": {
     "files": [
-      {"payload": ".pr-lab/scenarios/hero-review/payload/__init__.py", "target": "scenario-fixtures/hero_review/__init__.py", "content_sha256": "2adcb8ee528e9cf19c85418de146cf926bfa217c880088118704c83e7cf4ec5d"},
-      {"payload": ".pr-lab/scenarios/hero-review/payload/models.py", "target": "scenario-fixtures/hero_review/models.py", "content_sha256": "5fb700f31890f08bea54ca79154a446167e16b0507c025ca674135801c3525c0"},
-      {"payload": ".pr-lab/scenarios/hero-review/payload/gate.py", "target": "scenario-fixtures/hero_review/gate.py", "content_sha256": "dfeced2320a67dad0f5985f109d2a2e25a76b188f0470fc6681a4d91cb0c4969"},
-      {"payload": ".pr-lab/scenarios/hero-review/payload/cache.py", "target": "scenario-fixtures/hero_review/cache.py", "content_sha256": "52e25bc29f2d0c4af6750712ba9c6ecdbe0051d133374a8a5f6b1043fea3b9f0"}
+      {"payload": ".pr-lab/scenarios/hero-review/payload/__init__.py", "target": "scenario-fixtures/hero_review/__init__.py", "content_sha256": "2adcb8ee528e9cf19c85418de146cf926bfa217c880088118704c83e7cf4ec5d", "repaired_content_sha256": "2adcb8ee528e9cf19c85418de146cf926bfa217c880088118704c83e7cf4ec5d"},
+      {"payload": ".pr-lab/scenarios/hero-review/payload/models.py", "target": "scenario-fixtures/hero_review/models.py", "content_sha256": "5fb700f31890f08bea54ca79154a446167e16b0507c025ca674135801c3525c0", "repaired_content_sha256": "5fb700f31890f08bea54ca79154a446167e16b0507c025ca674135801c3525c0"},
+      {"payload": ".pr-lab/scenarios/hero-review/payload/gate.py", "target": "scenario-fixtures/hero_review/gate.py", "content_sha256": "dfeced2320a67dad0f5985f109d2a2e25a76b188f0470fc6681a4d91cb0c4969", "repaired_content_sha256": "a6c3dd7afb76c1963da6c5f98617823b2e4c964242c56135f8ebb9c18b35d48e"},
+      {"payload": ".pr-lab/scenarios/hero-review/payload/cache.py", "target": "scenario-fixtures/hero_review/cache.py", "content_sha256": "52e25bc29f2d0c4af6750712ba9c6ecdbe0051d133374a8a5f6b1043fea3b9f0", "repaired_content_sha256": "3ef3d49e70789ac344795df333e2dbf2bf39604d80068c89482890a8a620d1e2"}
     ],
     "admitted_changed_paths": [
       ".pr-lab/scenario.json",

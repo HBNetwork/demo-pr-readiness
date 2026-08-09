@@ -3,7 +3,7 @@
   "scenario": "agent-repair",
   "behavior": {"kind": "pass"},
   "review_lenses": ["correctness", "test-quality", "risk"],
-  "source_basis": {"path": "src/pr_fixture/readiness.py", "sha256": "2beb15361677cfdfc7ae22dc326dbf27dfaee2df90bd02e78acab1434873be3f"},
+  "source_basis": {"path": "src/pr_fixture/readiness.py", "sha256": "e9e710c26956df7c0fa41d5847d0ef5ae6f1d3a066a85fb71d8460db08d1582d"},
   "fixture": {"payload": ".pr-lab/scenarios/agent-repair/payload.py", "target": "scenario-fixtures/agent_repair.py", "admitted_changed_paths": [".pr-lab/scenario.json", "scenario-fixtures/agent_repair.py"]},
-  "expectation": {"kind": "agent_repair", "target": "scenario-fixtures/agent_repair.py", "content_sha256": "9a6a7371e160c897bcc539dce0c3e1fee2e8167007a12273639f0d3d3845edaa", "failing_test": "test_agent_repair_high_risk_threshold", "repair_paths": ["scenario-fixtures/agent_repair.py"]}
+  "expectation": {"kind": "agent_repair", "target": "scenario-fixtures/agent_repair.py", "content_sha256": "9a6a7371e160c897bcc539dce0c3e1fee2e8167007a12273639f0d3d3845edaa", "repaired_content_sha256": "01a42e701273b3542640f72ed5f4637dfd32f21d23fa10df299fe219368d12c0", "failing_test": "test_agent_repair_high_risk_threshold", "repair_paths": ["scenario-fixtures/agent_repair.py"]}
 }

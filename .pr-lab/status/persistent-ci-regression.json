@@ -2,11 +2,11 @@
   "schema_version": 1,
   "record_owner": "Ariad",
   "scenario": "persistent-ci-regression",
-  "status": "incomplete",
-  "disposition": "blocking_scenario_preserved_without_merge",
+  "status": "complete",
+  "disposition": "blocking_activation_rejected_scenario_preserved_dormant",
   "finding": {
     "id": "IMP-25-001",
-    "state": "still_open",
+    "state": "closed_without_merge",
     "summary": "Persistent failure blocks every required CI check"
   },
   "source_review": {
@@ -24,12 +24,11 @@
       "integration: skipped"
     ]
   },
-  "reason": "The active selector uses persistent_failure, so scenario-control exits 1 on every attempt and all dependent checks remain blocked.",
-  "future_remediation": [
-    "Restore .pr-lab/scenario.json to the passing clean-green selector.",
-    "Remove the generated scenario-fixtures/persistent_ci_regression.py file.",
-    "Retain .pr-lab/scenarios/persistent-ci-regression/scenario.json and payload.py as the dormant deterministic test scenario.",
-    "Run scenario-control, lint, type, unit, build, and integration checks; accept production changes only after every required check passes."
+  "reason": "The source review correctly remained blocked because persistent_failure never passes. Its activation was not merged; the clean-green selector is restored and no generated fixture remains.",
+  "resolution": [
+    "Keep .pr-lab/scenario.json on the passing clean-green selector.",
+    "Keep the persistent-ci-regression manifest and payload as a dormant deterministic scenario.",
+    "Exclude the persistent_failure activation and generated fixture from the baseline."
   ],
   "integration": {
     "accepted": [],

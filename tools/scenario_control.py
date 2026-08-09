@@ -42,10 +42,25 @@ EXPECTATION_FIELDS = {
         {"kind", "target", "content_sha256", "semantic_fingerprint"}
     ),
     "conversational_instruction": frozenset(
-        {"kind", "target", "content_sha256", "instruction"}
+        {
+            "kind",
+            "target",
+            "content_sha256",
+            "instruction",
+            "instruction_paths",
+            "instruction_source_sha256",
+            "instruction_result_sha256",
+        }
     ),
     "agent_repair": frozenset(
-        {"kind", "target", "content_sha256", "failing_test", "repair_paths"}
+        {
+            "kind",
+            "target",
+            "content_sha256",
+            "repaired_content_sha256",
+            "failing_test",
+            "repair_paths",
+        }
     ),
     "hero_review": frozenset(
         {"kind", "semantic_fingerprints", "validator", "validator_sha256"}
@@ -62,7 +77,9 @@ SCENARIO_CONTRACTS = {
 }
 SINGLE_FILE_FIXTURE_FIELDS = frozenset({"payload", "target", "admitted_changed_paths"})
 HERO_FIXTURE_FIELDS = frozenset({"files", "admitted_changed_paths"})
-HERO_FILE_FIELDS = frozenset({"payload", "target", "content_sha256"})
+HERO_FILE_FIELDS = frozenset(
+    {"payload", "target", "content_sha256", "repaired_content_sha256"}
+)
 HERO_VALIDATOR = ".pr-lab/scenarios/hero-review/validate.py"
 
 
@@ -231,7 +248,17 @@ def validate_manifest(value: Any, scenario_id: str, root: Path = ROOT) -> dict[s
             digest = entry["content_sha256"]
             if not isinstance(digest, str) or not HEX64.fullmatch(digest):
                 raise ControlError("fixture file content_sha256 must be lowercase sha256")
-            files.append({"payload": payload, "target": target, "content_sha256": digest})
+            repaired_digest = entry["repaired_content_sha256"]
+            if not isinstance(repaired_digest, str) or not HEX64.fullmatch(repaired_digest):
+                raise ControlError("fixture repaired_content_sha256 must be lowercase sha256")
+            files.append(
+                {
+                    "payload": payload,
+                    "target": target,
+                    "content_sha256": digest,
+                    "repaired_content_sha256": repaired_digest,
+                }
+            )
     else:
         payload = safe_path(fixture["payload"], "fixture.payload")
         target = safe_path(fixture["target"], "fixture.target")
@@ -246,8 +273,6 @@ def validate_manifest(value: Any, scenario_id: str, root: Path = ROOT) -> dict[s
     normalized = [safe_path(item, "admitted_changed_paths item") for item in admitted]
     if len(normalized) != len(set(normalized)):
         raise ControlError("admitted_changed_paths contains duplicates")
-    if normalized != [SELECTOR, *targets]:
-        raise ControlError("admitted_changed_paths must contain selector then ordered targets")
     if any(
         not payload.startswith(canonical_prefix) or payload == canonical_prefix
         for payload in payloads
@@ -268,6 +293,7 @@ def validate_manifest(value: Any, scenario_id: str, root: Path = ROOT) -> dict[s
         if not isinstance(digest, str) or not HEX64.fullmatch(digest):
             raise ControlError("expectation.content_sha256 must be lowercase sha256")
         files[0]["content_sha256"] = digest
+    mutations: list[str] = []
     if expectation_kind == "hero_review":
         fingerprints = expectation["semantic_fingerprints"]
         if (
@@ -294,14 +320,49 @@ def validate_manifest(value: Any, scenario_id: str, root: Path = ROOT) -> dict[s
         _text(expectation["semantic_fingerprint"], "semantic_fingerprint")
     elif expectation_kind == "conversational_instruction":
         _text(expectation["instruction"], "instruction")
+        instruction_paths = expectation["instruction_paths"]
+        if not isinstance(instruction_paths, list) or len(instruction_paths) != 1:
+            raise ControlError("instruction_paths must contain exactly one path")
+        mutations = [safe_path(item, "instruction_paths item") for item in instruction_paths]
+        if len(mutations) != len(set(mutations)) or set(mutations).intersection(
+            {SELECTOR, *targets}
+        ):
+            raise ControlError("instruction_paths must be unique and separate from fixture paths")
+        instruction_digests = [
+            expectation["instruction_source_sha256"],
+            expectation["instruction_result_sha256"],
+        ]
+        if (
+            any(
+                not isinstance(item, str) or not HEX64.fullmatch(item)
+                for item in instruction_digests
+            )
+            or instruction_digests[0] == instruction_digests[1]
+        ):
+            raise ControlError("instruction source and result must be distinct lowercase sha256")
     elif expectation_kind == "agent_repair":
         _text(expectation["failing_test"], "failing_test")
+        repaired_digest = expectation["repaired_content_sha256"]
+        if not isinstance(repaired_digest, str) or not HEX64.fullmatch(repaired_digest):
+            raise ControlError("repaired_content_sha256 must be lowercase sha256")
+        if repaired_digest == expectation["content_sha256"]:
+            raise ControlError("repaired_content_sha256 must differ from seeded content")
         repair_paths = expectation["repair_paths"]
         if not isinstance(repair_paths, list) or not repair_paths:
             raise ControlError("repair_paths must be a non-empty array")
-        repairs = [safe_path(item, "repair_paths item") for item in repair_paths]
-        if len(repairs) != len(set(repairs)) or targets[0] not in repairs:
-            raise ControlError("repair_paths must be unique and include fixture target")
+        mutations = [safe_path(item, "repair_paths item") for item in repair_paths]
+        if mutations != [targets[0]]:
+            raise ControlError("repair_paths must contain only the pinned fixture target")
+    expected_admitted = [SELECTOR, *targets]
+    expected_admitted.extend(path for path in mutations if path not in expected_admitted)
+    if normalized != expected_admitted:
+        raise ControlError(
+            "admitted_changed_paths must contain selector, ordered targets, then mutation paths"
+        )
+    if expectation_kind == "hero_review" and all(
+        entry["content_sha256"] == entry["repaired_content_sha256"] for entry in files
+    ):
+        raise ControlError("hero repaired content must differ from seeded content")
 
     scenario_directory = (root / SCENARIOS / scenario).resolve()
     for entry in files:
@@ -313,6 +374,10 @@ def validate_manifest(value: Any, scenario_id: str, root: Path = ROOT) -> dict[s
     _confined(root, basis_path, "source_basis.path")
     for target in targets:
         _confined(root, target, "fixture.target", allow_missing=True)
+    if expectation_kind == "conversational_instruction":
+        instruction_file = _confined(root, mutations[0], "instruction path")
+        if _sha256(instruction_file.read_bytes()) not in instruction_digests:
+            raise ControlError("instruction path does not match its source or result sha256")
     if expectation_kind == "hero_review":
         _run_fixture_validator(manifest, root, payloads)
     return manifest
@@ -367,6 +432,52 @@ def _run_fixture_validator(
             raise ControlError("hero fixture validator timed out") from error
     if result.returncode:
         raise ControlError("hero fixture validator failed")
+
+
+def _fixture_state(
+    manifest: dict[str, Any], root: Path, *, allow_repaired: bool = False
+) -> str:
+    """Validate fixture bytes and return their admitted lifecycle state."""
+    files = _fixture_files(manifest)
+    targets = [
+        _confined(root, entry["target"], "fixture.target", allow_missing=True)
+        for entry in files
+    ]
+    if not all(target.is_file() for target in targets):
+        raise ControlError("active scenario fixture target is missing")
+    payloads = [
+        _confined(root, entry["payload"], "fixture.payload").read_bytes() for entry in files
+    ]
+    if all(target.read_bytes() == payload for target, payload in zip(targets, payloads)):
+        _run_fixture_validator(manifest, root)
+        return "prepared"
+
+    expectation = manifest["expectation"]
+    if allow_repaired and expectation["kind"] == "agent_repair":
+        if _sha256(targets[0].read_bytes()) == expectation["repaired_content_sha256"]:
+            return "repaired"
+    if allow_repaired and expectation["kind"] == "hero_review":
+        repaired = [entry["repaired_content_sha256"] for entry in files]
+        if all(_sha256(target.read_bytes()) == digest for target, digest in zip(targets, repaired)):
+            _run_fixture_validator(manifest, root, allow_repaired=True)
+            return "repaired"
+    raise ControlError("active scenario fixture content is not admitted")
+
+
+def _instruction_state(
+    manifest: dict[str, Any], root: Path, *, require_result: bool = False
+) -> str:
+    """Validate the conversational instruction source or exact completed result."""
+    expectation = manifest["expectation"]
+    if expectation["kind"] != "conversational_instruction":
+        return "prepared"
+    path = _confined(root, expectation["instruction_paths"][0], "instruction path")
+    digest = _sha256(path.read_bytes())
+    if digest == expectation["instruction_result_sha256"]:
+        return "instructed"
+    if not require_result and digest == expectation["instruction_source_sha256"]:
+        return "prepared"
+    raise ControlError("conversational instruction result is not admitted")
 
 
 def _manifest_name(scenario: str) -> str:
@@ -500,6 +611,24 @@ def _is_exact_prepared_status(
     return SELECTOR not in observed or observed[SELECTOR] == " M"
 
 
+def _is_admitted_lifecycle_status(
+    state: list[tuple[str, str]], manifest: dict[str, Any], lifecycle: str
+) -> bool:
+    """Return whether unstaged changes match the fixture lifecycle contract."""
+    admitted = manifest["fixture"]["admitted_changed_paths"]
+    targets = {entry["target"] for entry in _fixture_files(manifest)}
+    expectation = manifest["expectation"]
+    instruction_paths = set(expectation.get("instruction_paths", []))
+    for status, path in state:
+        if path not in admitted or status not in {" M", "??"}:
+            return False
+        if path in targets and lifecycle != "repaired" and status != "??":
+            return False
+        if path not in {SELECTOR, *targets, *instruction_paths}:
+            return False
+    return True
+
+
 def _observed_paths(root: Path) -> list[str]:
     return sorted({path for _, path in _porcelain(root)})
 
@@ -561,6 +690,8 @@ def prepare(
     scenario, manifest = _select_manifest(manifest_path, scenario, root)
     head = observed_head(root)
     _verify_basis(manifest, root)
+    if _instruction_state(manifest, root) != "prepared":
+        raise ControlError("conversational instruction is already completed")
     files = _fixture_files(manifest)
     payloads = [
         _confined(root, entry["payload"], "fixture.payload").read_bytes() for entry in files
@@ -576,6 +707,7 @@ def prepare(
         selector.read_bytes() == selector_bytes
         and all(target.is_file() for target in targets)
         and all(target.read_bytes() == payload for target, payload in zip(targets, payloads))
+        and _instruction_state(manifest, root) == "prepared"
         and _is_exact_prepared_status(state, [entry["target"] for entry in files])
     )
     if exact_prepared:
@@ -652,24 +784,22 @@ def inspect(
     admitted = manifest["fixture"]["admitted_changed_paths"]
     observed = _observed_paths(root)
     files = _fixture_files(manifest)
-    payloads = [
-        _confined(root, entry["payload"], "fixture.payload").read_bytes() for entry in files
-    ]
     targets = [
         _confined(root, entry["target"], "fixture.target", allow_missing=True) for entry in files
     ]
     selector_matches = _confined(root, SELECTOR, "selector").read_bytes() == _selector(manifest)
     state = _porcelain(root)
-    prepared = (
-        all(target.is_file() for target in targets)
-        and all(target.read_bytes() == payload for target, payload in zip(targets, payloads))
-        and selector_matches
-        and _is_exact_prepared_status(state, [entry["target"] for entry in files])
-    )
-    if prepared:
-        _run_fixture_validator(manifest, root)
+    if selector_matches and all(target.is_file() for target in targets):
+        lifecycle = _fixture_state(manifest, root, allow_repaired=True)
+        instruction_lifecycle = _instruction_state(manifest, root)
+        if instruction_lifecycle == "instructed":
+            lifecycle = instruction_lifecycle
+        if not _is_admitted_lifecycle_status(state, manifest, lifecycle):
+            raise ControlError("worktree is neither clean baseline nor exact prepared state")
     elif state or any(target.exists() for target in targets):
         raise ControlError("worktree is neither clean baseline nor exact prepared state")
+    else:
+        lifecycle = "not-prepared"
     manifest_digest, payload_digest, result_digest = _identities(manifest, root)
     return {
         "schema_version": 1,
@@ -682,7 +812,7 @@ def inspect(
         "result_sha256": result_digest,
         "admitted_changed_paths": admitted,
         "observed_changed_paths": observed,
-        "state": "prepared" if prepared else "not-prepared",
+        "state": lifecycle,
     }
 
 
@@ -836,13 +966,8 @@ def main(argv: list[str] | None = None) -> int:
             selector = _confined(ROOT, SELECTOR, "selector")
             if selector.read_bytes() != _selector(manifest):
                 raise ControlError("active control does not exactly match selected manifest")
-            targets = [
-                _confined(ROOT, entry["target"], "fixture.target", allow_missing=True)
-                for entry in _fixture_files(manifest)
-            ]
-            if not all(target.is_file() for target in targets):
-                raise ControlError("active scenario fixture target is missing")
-            _run_fixture_validator(manifest, ROOT, allow_repaired=True)
+            _fixture_state(manifest, ROOT, allow_repaired=True)
+            _instruction_state(manifest, ROOT, require_result=True)
             context = _github_context(head, required=True)
             if context["run_attempt"] != str(attempt):
                 raise ControlError("attempt must equal GITHUB_RUN_ATTEMPT")
@@ -854,6 +979,11 @@ def main(argv: list[str] | None = None) -> int:
                 manifest["fixture"]["admitted_changed_paths"]
             ):
                 raise ControlError("CI changed paths are empty or not admitted")
+            expectation = manifest["expectation"]
+            if expectation["kind"] == "conversational_instruction" and not set(
+                expectation["instruction_paths"]
+            ) <= set(observed_paths):
+                raise ControlError("CI changed paths omit required instruction paths")
         else:
             _github_context(head, required=False)
             evidence_path = None

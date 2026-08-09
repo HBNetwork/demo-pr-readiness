@@ -13,7 +13,7 @@ class PullRequestFacts:
 
 def ready_for_release(facts: PullRequestFacts) -> bool:
     """Return whether the observed review and CI posture permits release."""
-    return not facts.draft and facts.approvals > 0 and facts.checks_green
+    return not facts.draft and facts.approvals > 0 and facts.checks_green and facts.mergeable
 
 
 def required_approvals(risk: str) -> int:

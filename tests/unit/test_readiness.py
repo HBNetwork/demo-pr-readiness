@@ -18,6 +18,11 @@ def test_release_readiness_rejects_a_draft() -> None:
     assert not ready_for_release(facts)
 
 
+def test_release_readiness_rejects_an_unmergeable_change() -> None:
+    facts = PullRequestFacts(draft=False, approvals=1, checks_green=True, mergeable=False)
+    assert not ready_for_release(facts)
+
+
 def test_high_risk_requires_two_approvals() -> None:
     assert required_approvals("high") == 2
 

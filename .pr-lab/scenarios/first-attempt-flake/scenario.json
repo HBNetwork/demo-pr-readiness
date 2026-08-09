@@ -3,7 +3,7 @@
   "scenario": "first-attempt-flake",
   "behavior": {"kind": "first_attempt_flake", "fingerprint": "scenario:first-attempt-flake:v1"},
   "review_lenses": ["correctness", "test-quality", "risk"],
-  "source_basis": {"path": "src/pr_fixture/readiness.py", "sha256": "2beb15361677cfdfc7ae22dc326dbf27dfaee2df90bd02e78acab1434873be3f"},
+  "source_basis": {"path": "src/pr_fixture/readiness.py", "sha256": "e9e710c26956df7c0fa41d5847d0ef5ae6f1d3a066a85fb71d8460db08d1582d"},
   "fixture": {"payload": ".pr-lab/scenarios/first-attempt-flake/payload.py", "target": "scenario-fixtures/first_attempt_flake.py", "admitted_changed_paths": [".pr-lab/scenario.json", "scenario-fixtures/first_attempt_flake.py"]},
   "expectation": {"kind": "content", "target": "scenario-fixtures/first_attempt_flake.py", "content_sha256": "e0bd36a3829fd87833f0e999e6e450f0fd583e31cc4f75a6f63919ebe747fe0b"}
 }
