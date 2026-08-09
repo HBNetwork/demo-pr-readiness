@@ -4,7 +4,8 @@
   "purpose": "Observe maintainer-edit access and independent reviewer approval as explicit collaboration gates.",
   "content_scenario": {
     "id": "clean-green",
-    "manifest": ".pr-lab/scenarios/clean-green/scenario.json"
+    "manifest": ".pr-lab/scenarios/clean-green/scenario.json",
+    "manifest_sha256": "50c359d21463760bae9f45f8621110a3e5e5327fef0cd0cac668e11a100c401f"
   },
   "initial_provider_state": {
     "pull_request": "open",

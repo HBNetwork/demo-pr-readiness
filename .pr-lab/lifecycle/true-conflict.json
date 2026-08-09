@@ -4,7 +4,8 @@
   "purpose": "Observe a genuine base conflict and its resolution while leaving the referenced scenario manifest unchanged.",
   "content_scenario": {
     "id": "clean-green",
-    "manifest": ".pr-lab/scenarios/clean-green/scenario.json"
+    "manifest": ".pr-lab/scenarios/clean-green/scenario.json",
+    "manifest_sha256": "50c359d21463760bae9f45f8621110a3e5e5327fef0cd0cac668e11a100c401f"
   },
   "initial_provider_state": {
     "pull_request": "open",
@@ -30,9 +31,21 @@
   "expected_transitions": [
     {
       "after_action": "introduce-conflicting-base-change",
+      "field": "base_relation",
+      "from": "current",
+      "to": "stale"
+    },
+    {
+      "after_action": "introduce-conflicting-base-change",
       "field": "mergeability",
       "from": "mergeable",
       "to": "conflicting"
+    },
+    {
+      "after_action": "resolve-conflict",
+      "field": "base_relation",
+      "from": "stale",
+      "to": "current"
     },
     {
       "after_action": "resolve-conflict",
@@ -42,6 +55,10 @@
     }
   ],
   "completion_conditions": [
+    {
+      "field": "base_relation",
+      "equals": "current"
+    },
     {
       "field": "mergeability",
       "equals": "mergeable"

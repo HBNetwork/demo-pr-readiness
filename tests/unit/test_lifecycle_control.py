@@ -1,3 +1,4 @@
+import hashlib
 import json
 import shutil
 import subprocess
@@ -33,6 +34,10 @@ def write_recipe(root: Path, recipe_id: str, recipe: dict[str, object]) -> None:
     (root / f".pr-lab/lifecycle/{recipe_id}.json").write_text(json.dumps(recipe) + "\n")
 
 
+def file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def test_committed_registry_is_exact_complete_and_validation_only() -> None:
     registry = load_registry(ROOT)
 
@@ -49,7 +54,7 @@ def test_committed_registry_is_exact_complete_and_validation_only() -> None:
 def test_each_recipe_reaches_completion_then_declares_full_cleanup(recipe_id: str) -> None:
     recipe = load_registry(ROOT)[recipe_id]
 
-    assert len(recipe["operator_actions"]) == len(recipe["expected_transitions"])
+    assert len(recipe["operator_actions"]) <= len(recipe["expected_transitions"])
     assert [item["operation"] for item in recipe["cleanup_expectations"]] == [
         "close-pull-request",
         "delete-head-branch",
@@ -199,6 +204,9 @@ def test_non_content_scenario_binding_is_rejected(repository: Path) -> None:
     recipe["content_scenario"] = {
         "id": "agent-repair",
         "manifest": ".pr-lab/scenarios/agent-repair/scenario.json",
+        "manifest_sha256": file_sha256(
+            repository / ".pr-lab/scenarios/agent-repair/scenario.json"
+        ),
     }
 
     with pytest.raises(LifecycleError, match="deterministic content scenario"):
@@ -210,6 +218,9 @@ def test_alternate_content_scenario_binding_is_rejected(repository: Path) -> Non
     recipe["content_scenario"] = {
         "id": "first-attempt-flake",
         "manifest": ".pr-lab/scenarios/first-attempt-flake/scenario.json",
+        "manifest_sha256": file_sha256(
+            repository / ".pr-lab/scenarios/first-attempt-flake/scenario.json"
+        ),
     }
 
     with pytest.raises(LifecycleError, match="canonical binding"):
@@ -222,6 +233,60 @@ def test_unrelated_initial_state_is_rejected(repository: Path) -> None:
 
     with pytest.raises(LifecycleError, match="initial provider state"):
         validate_recipe(recipe, "collaboration-gate", repository)
+
+
+def test_content_manifest_bytes_are_pinned_and_fully_validated(repository: Path) -> None:
+    manifest_path = repository / ".pr-lab/scenarios/clean-green/scenario.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["review_lenses"] = ["risk", "test-quality", "correctness"]
+    manifest_path.write_text(json.dumps(manifest) + "\n")
+
+    with pytest.raises(LifecycleError, match="manifest_sha256"):
+        load_registry(repository)
+
+    recipe = read_recipe(repository, "draft-to-ready")
+    recipe["content_scenario"]["manifest_sha256"] = file_sha256(manifest_path)
+    with pytest.raises(LifecycleError, match="content scenario manifest is invalid"):
+        validate_recipe(recipe, "draft-to-ready", repository)
+
+
+def test_content_manifest_digest_must_be_lowercase_sha256(repository: Path) -> None:
+    recipe = read_recipe(repository, "draft-to-ready")
+    recipe["content_scenario"]["manifest_sha256"] = "BAD"
+    with pytest.raises(LifecycleError, match="lowercase sha256"):
+        validate_recipe(recipe, "draft-to-ready", repository)
+
+
+def test_true_conflict_requires_coupled_transitions_and_completion(repository: Path) -> None:
+    recipe = read_recipe(repository, "true-conflict")
+    assert [
+        (item["after_action"], item["field"], item["from"], item["to"])
+        for item in recipe["expected_transitions"]
+    ] == [
+        ("introduce-conflicting-base-change", "base_relation", "current", "stale"),
+        ("introduce-conflicting-base-change", "mergeability", "mergeable", "conflicting"),
+        ("resolve-conflict", "base_relation", "stale", "current"),
+        ("resolve-conflict", "mergeability", "conflicting", "mergeable"),
+    ]
+    assert recipe["completion_conditions"] == [
+        {"field": "base_relation", "equals": "current"},
+        {"field": "mergeability", "equals": "mergeable"},
+    ]
+
+    invalid = json.loads(json.dumps(recipe))
+    del invalid["expected_transitions"][0]
+    with pytest.raises(LifecycleError, match="complete expected transitions"):
+        validate_recipe(invalid, "true-conflict", repository)
+
+    invalid = json.loads(json.dumps(recipe))
+    invalid["expected_transitions"][0:2] = reversed(invalid["expected_transitions"][0:2])
+    with pytest.raises(LifecycleError, match="not admitted"):
+        validate_recipe(invalid, "true-conflict", repository)
+
+    invalid = json.loads(json.dumps(recipe))
+    del invalid["completion_conditions"][0]
+    with pytest.raises(LifecycleError, match="incomplete or out of canonical order"):
+        validate_recipe(invalid, "true-conflict", repository)
 
 
 @pytest.mark.parametrize(

@@ -10,10 +10,12 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 MARKER = re.compile(
-    r"<!-- hamsterdan-rerun run=([1-9][0-9]*) head=([0-9a-f]{40}) "
+    r"<!-- hamsterdan-rerun run=([1-9][0-9]{0,19}) head=([0-9a-f]{40}) "
     r"operation=([A-Za-z0-9][A-Za-z0-9._:-]{0,127}) -->"
 )
 WORKFLOW = ".github/workflows/ci.yml"
+POSITIVE_INTEGER = re.compile(r"[1-9][0-9]{0,19}")
+MAX_RUN_JSON_CHARACTERS = 1_000_000
 
 
 class BrokerError(ValueError):
@@ -43,9 +45,11 @@ def parse_marker(marker: str) -> RerunRequest:
 
 def parse_run_json(raw_run: str) -> dict[str, Any]:
     """Decode a workflow run response as a JSON object."""
+    if len(raw_run) > MAX_RUN_JSON_CHARACTERS:
+        raise BrokerError("refusing malformed workflow run JSON")
     try:
         run = json.loads(raw_run)
-    except json.JSONDecodeError as error:
+    except (json.JSONDecodeError, RecursionError) as error:
         raise BrokerError("refusing malformed workflow run JSON") from error
     if not isinstance(run, dict):
         raise BrokerError("refusing malformed workflow run JSON")
@@ -84,7 +88,7 @@ def authorize_run(
 
 
 def _positive_integer(value: str) -> int:
-    if not re.fullmatch(r"[1-9][0-9]*", value):
+    if not POSITIVE_INTEGER.fullmatch(value):
         raise argparse.ArgumentTypeError("must be a positive integer")
     return int(value)
 

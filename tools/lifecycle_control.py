@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
 from pathlib import Path, PurePosixPath
 from typing import Any
+
+if __package__:
+    from tools.scenario_control import validate_manifest
+else:
+    from scenario_control import validate_manifest
 
 ROOT = Path(__file__).resolve().parents[1]
 LIFECYCLE_DIRECTORY = ".pr-lab/lifecycle"
@@ -15,6 +21,7 @@ REGISTRY_PATH = f"{LIFECYCLE_DIRECTORY}/registry.json"
 MAX_DOCUMENT_BYTES = 32_768
 MAX_OUTPUT_BYTES = 8_192
 ID_PATTERN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 
 RECIPE_IDS = (
     "collaboration-gate",
@@ -37,7 +44,7 @@ RECIPE_FIELDS = frozenset(
 )
 REGISTRY_FIELDS = frozenset({"schema_version", "recipes"})
 REGISTRY_ENTRY_FIELDS = frozenset({"id", "path"})
-CONTENT_SCENARIO_FIELDS = frozenset({"id", "manifest"})
+CONTENT_SCENARIO_FIELDS = frozenset({"id", "manifest", "manifest_sha256"})
 ACTION_FIELDS = frozenset({"id", "actor", "operation"})
 TRANSITION_FIELDS = frozenset({"after_action", "field", "from", "to"})
 CONDITION_FIELDS = frozenset({"field", "equals"})
@@ -62,13 +69,19 @@ STATE_VALUES = {
 }
 ACTORS = frozenset({"author", "operator", "reviewer"})
 OPERATION_TRANSITIONS = {
-    "mark-ready": ("readiness", "draft", "ready"),
-    "advance-base": ("base_relation", "current", "stale"),
-    "update-branch": ("base_relation", "stale", "current"),
-    "introduce-conflicting-base-change": ("mergeability", "mergeable", "conflicting"),
-    "resolve-conflict": ("mergeability", "conflicting", "mergeable"),
-    "enable-maintainer-edits": ("collaboration", "restricted", "maintainer-edits"),
-    "submit-approval": ("review", "pending", "approved"),
+    "mark-ready": (("readiness", "draft", "ready"),),
+    "advance-base": (("base_relation", "current", "stale"),),
+    "update-branch": (("base_relation", "stale", "current"),),
+    "introduce-conflicting-base-change": (
+        ("base_relation", "current", "stale"),
+        ("mergeability", "mergeable", "conflicting"),
+    ),
+    "resolve-conflict": (
+        ("base_relation", "stale", "current"),
+        ("mergeability", "conflicting", "mergeable"),
+    ),
+    "enable-maintainer-edits": (("collaboration", "restricted", "maintainer-edits"),),
+    "submit-approval": (("review", "pending", "approved"),),
 }
 CLEANUP_TRANSITIONS = {
     "close-pull-request": ("pull_request", "open", "closed"),
@@ -100,7 +113,7 @@ RECIPE_COMPLETION_FIELDS = {
     "collaboration-gate": ("collaboration", "review"),
     "draft-to-ready": ("readiness",),
     "stale-base": ("base_relation",),
-    "true-conflict": ("mergeability",),
+    "true-conflict": ("base_relation", "mergeability"),
 }
 EXPECTED_ACTORS = {
     "advance-base": "operator",
@@ -216,11 +229,18 @@ def _validate_content_scenario(value: Any, root: Path) -> None:
     expected = f".pr-lab/scenarios/{scenario_id}/scenario.json"
     if scenario["manifest"] != expected:
         raise LifecycleError("content scenario manifest path is not canonical")
-    manifest = _read_json(
-        _confined(root, expected, "content scenario manifest"), "content manifest"
-    )
-    if manifest.get("schema_version") != 2 or manifest.get("scenario") != scenario_id:
-        raise LifecycleError("content scenario manifest identity does not match")
+    declared_digest = scenario["manifest_sha256"]
+    if not isinstance(declared_digest, str) or not SHA256_PATTERN.fullmatch(declared_digest):
+        raise LifecycleError("content_scenario.manifest_sha256 must be lowercase sha256")
+    manifest_path = _confined(root, expected, "content scenario manifest")
+    manifest_bytes = manifest_path.read_bytes()
+    if hashlib.sha256(manifest_bytes).hexdigest() != declared_digest:
+        raise LifecycleError("content scenario manifest does not match manifest_sha256")
+    manifest = _read_json(manifest_path, "content manifest")
+    try:
+        validate_manifest(manifest, scenario_id, root)
+    except ValueError as error:
+        raise LifecycleError(f"content scenario manifest is invalid: {error}") from error
     expectation = manifest.get("expectation")
     if not isinstance(expectation, dict) or expectation.get("kind") != "content":
         raise LifecycleError("lifecycle recipes require a deterministic content scenario")
@@ -243,8 +263,6 @@ def validate_recipe(value: Any, recipe_id: str, root: Path = ROOT) -> dict[str, 
 
     actions = _array(recipe["operator_actions"], "operator_actions")
     transitions = _array(recipe["expected_transitions"], "expected_transitions")
-    if len(actions) != len(transitions):
-        raise LifecycleError("each operator action requires exactly one expected transition")
     expected_operations = RECIPE_OPERATIONS[recipe_id]
     if (
         tuple(action.get("operation") for action in actions if isinstance(action, dict))
@@ -252,9 +270,14 @@ def validate_recipe(value: Any, recipe_id: str, root: Path = ROOT) -> dict[str, 
     ):
         raise LifecycleError("recipe operator actions do not match its admitted lifecycle")
     action_ids: set[str] = set()
-    for index, (raw_action, raw_transition) in enumerate(zip(actions, transitions)):
+    transition_index = 0
+    expected_transition_count = sum(
+        len(OPERATION_TRANSITIONS[operation]) for operation in expected_operations
+    )
+    if len(transitions) != expected_transition_count:
+        raise LifecycleError("operator actions do not have their complete expected transitions")
+    for index, raw_action in enumerate(actions):
         action = _closed(raw_action, ACTION_FIELDS, f"operator_actions[{index}]")
-        transition = _closed(raw_transition, TRANSITION_FIELDS, f"expected_transitions[{index}]")
         action_id = _text(action["id"], f"operator_actions[{index}].id")
         operation = _text(action["operation"], f"operator_actions[{index}].operation")
         if action_id != operation or action_id in action_ids:
@@ -263,20 +286,27 @@ def validate_recipe(value: Any, recipe_id: str, root: Path = ROOT) -> dict[str, 
         actor = _text(action["actor"], f"operator_actions[{index}].actor")
         if actor not in ACTORS or actor != EXPECTED_ACTORS[operation]:
             raise LifecycleError(f"actor is not admitted for operation: {operation}")
-        expected_transition = OPERATION_TRANSITIONS[operation]
-        after_action = _text(
-            transition["after_action"], f"expected_transitions[{index}].after_action"
-        )
-        observed_transition = tuple(
-            _text(transition[key], f"expected_transitions[{index}].{key}")
-            for key in ("field", "from", "to")
-        )
-        if after_action != action_id or observed_transition != expected_transition:
-            raise LifecycleError(f"transition is not admitted for operation: {operation}")
-        field, old, new = expected_transition
-        if state[field] != old:
-            raise LifecycleError(f"transition source does not match current state: {action_id}")
-        state[field] = new
+        for expected_transition in OPERATION_TRANSITIONS[operation]:
+            transition = _closed(
+                transitions[transition_index],
+                TRANSITION_FIELDS,
+                f"expected_transitions[{transition_index}]",
+            )
+            after_action = _text(
+                transition["after_action"],
+                f"expected_transitions[{transition_index}].after_action",
+            )
+            observed_transition = tuple(
+                _text(transition[key], f"expected_transitions[{transition_index}].{key}")
+                for key in ("field", "from", "to")
+            )
+            if after_action != action_id or observed_transition != expected_transition:
+                raise LifecycleError(f"transition is not admitted for operation: {operation}")
+            field, old, new = expected_transition
+            if state[field] != old:
+                raise LifecycleError(f"transition source does not match current state: {action_id}")
+            state[field] = new
+            transition_index += 1
 
     conditions = _array(recipe["completion_conditions"], "completion_conditions")
     fields: list[str] = []
@@ -382,6 +412,7 @@ def _summary(recipe_id: str, recipe: dict[str, Any]) -> dict[str, Any]:
         "id": recipe_id,
         "path": _canonical_recipe_path(recipe_id),
         "content_scenario": recipe["content_scenario"]["id"],
+        "content_manifest_sha256": recipe["content_scenario"]["manifest_sha256"],
         "operator_actions": [item["id"] for item in recipe["operator_actions"]],
         "observable_transitions": len(recipe["expected_transitions"]),
         "completion_conditions": len(recipe["completion_conditions"]),

@@ -17,7 +17,6 @@ jobs:
     permissions:
       actions: write
       contents: read
-      issues: read
     runs-on: ubuntu-24.04
     env:
       COMMENT_BODY: ${{ github.event.comment.body }}
@@ -32,9 +31,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          readarray -t request < <(
+          request_output="$(
             python tools/rerun_broker.py parse-marker --marker "$COMMENT_BODY"
-          )
+          )"
+          readarray -t request <<<"$request_output"
+          [[ "${#request[@]}" -eq 3 ]]
           run_id="${request[0]}"
           expected_head="${request[1]}"
           operation="${request[2]}"
