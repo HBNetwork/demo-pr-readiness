@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "id": "draft-to-ready",
+  "purpose": "Observe a draft pull request becoming ready without changing its deterministic content scenario.",
+  "content_scenario": {
+    "id": "clean-green",
+    "manifest": ".pr-lab/scenarios/clean-green/scenario.json",
+    "manifest_sha256": "50c359d21463760bae9f45f8621110a3e5e5327fef0cd0cac668e11a100c401f"
+  },
+  "initial_provider_state": {
+    "pull_request": "open",
+    "head_branch": "present",
+    "readiness": "draft",
+    "base_relation": "current",
+    "mergeability": "mergeable",
+    "collaboration": "maintainer-edits",
+    "review": "pending"
+  },
+  "operator_actions": [
+    {
+      "id": "mark-ready",
+      "actor": "author",
+      "operation": "mark-ready"
+    }
+  ],
+  "expected_transitions": [
+    {
+      "after_action": "mark-ready",
+      "field": "readiness",
+      "from": "draft",
+      "to": "ready"
+    }
+  ],
+  "completion_conditions": [
+    {
+      "field": "readiness",
+      "equals": "ready"
+    }
+  ],
+  "cleanup_expectations": [
+    {
+      "id": "close-pull-request",
+      "actor": "operator",
+      "operation": "close-pull-request",
+      "field": "pull_request",
+      "from": "open",
+      "to": "closed"
+    },
+    {
+      "id": "delete-head-branch",
+      "actor": "operator",
+      "operation": "delete-head-branch",
+      "field": "head_branch",
+      "from": "present",
+      "to": "deleted"
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "id": "true-conflict",
+  "purpose": "Observe a genuine base conflict and its resolution while leaving the referenced scenario manifest unchanged.",
+  "content_scenario": {
+    "id": "clean-green",
+    "manifest": ".pr-lab/scenarios/clean-green/scenario.json",
+    "manifest_sha256": "50c359d21463760bae9f45f8621110a3e5e5327fef0cd0cac668e11a100c401f"
+  },
+  "initial_provider_state": {
+    "pull_request": "open",
+    "head_branch": "present",
+    "readiness": "ready",
+    "base_relation": "current",
+    "mergeability": "mergeable",
+    "collaboration": "maintainer-edits",
+    "review": "pending"
+  },
+  "operator_actions": [
+    {
+      "id": "introduce-conflicting-base-change",
+      "actor": "operator",
+      "operation": "introduce-conflicting-base-change"
+    },
+    {
+      "id": "resolve-conflict",
+      "actor": "author",
+      "operation": "resolve-conflict"
+    }
+  ],
+  "expected_transitions": [
+    {
+      "after_action": "introduce-conflicting-base-change",
+      "field": "base_relation",
+      "from": "current",
+      "to": "stale"
+    },
+    {
+      "after_action": "introduce-conflicting-base-change",
+      "field": "mergeability",
+      "from": "mergeable",
+      "to": "conflicting"
+    },
+    {
+      "after_action": "resolve-conflict",
+      "field": "base_relation",
+      "from": "stale",
+      "to": "current"
+    },
+    {
+      "after_action": "resolve-conflict",
+      "field": "mergeability",
+      "from": "conflicting",
+      "to": "mergeable"
+    }
+  ],
+  "completion_conditions": [
+    {
+      "field": "base_relation",
+      "equals": "current"
+    },
+    {
+      "field": "mergeability",
+      "equals": "mergeable"
+    }
+  ],
+  "cleanup_expectations": [
+    {
+      "id": "close-pull-request",
+      "actor": "operator",
+      "operation": "close-pull-request",
+      "field": "pull_request",
+      "from": "open",
+      "to": "closed"
+    },
+    {
+      "id": "delete-head-branch",
+      "actor": "operator",
+      "operation": "delete-head-branch",
+      "field": "head_branch",
+      "from": "present",
+      "to": "deleted"
+    }
+  ]
+}

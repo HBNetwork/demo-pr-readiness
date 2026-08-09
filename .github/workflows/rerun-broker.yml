@@ -17,7 +17,6 @@ jobs:
     permissions:
       actions: write
       contents: read
-      issues: read
     runs-on: ubuntu-24.04
     env:
       COMMENT_BODY: ${{ github.event.comment.body }}
@@ -25,40 +24,27 @@ jobs:
       REPOSITORY: ${{ github.repository }}
       GH_TOKEN: ${{ github.token }}
     steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
       - name: Validate and request exact PR run rerun
         shell: bash
         run: |
           set -euo pipefail
-          readarray -t request < <(python - <<'PY'
-          import os
-          import re
-
-          marker = re.fullmatch(
-              r"<!-- hamsterdan-rerun run=([1-9][0-9]*) head=([0-9a-f]{40}) operation=([A-Za-z0-9][A-Za-z0-9._:-]{0,127}) -->",
-              os.environ["COMMENT_BODY"],
-          )
-          if marker is None:
-              raise SystemExit("refusing malformed rerun broker marker")
-          print(marker.group(1))
-          print(marker.group(2))
-          PY
-          )
+          request_output="$(
+            python tools/rerun_broker.py parse-marker --marker "$COMMENT_BODY"
+          )"
+          readarray -t request <<<"$request_output"
+          [[ "${#request[@]}" -eq 3 ]]
           run_id="${request[0]}"
           expected_head="${request[1]}"
+          operation="${request[2]}"
           run="$(gh api "repos/${REPOSITORY}/actions/runs/${run_id}")"
-          RUN="$run" EXPECTED_HEAD="$expected_head" python - <<'PY'
-          import json
-          import os
-
-          run = json.loads(os.environ["RUN"])
-          valid = (
-              run.get("repository", {}).get("full_name") == os.environ["REPOSITORY"]
-              and run.get("event") == "pull_request"
-              and run.get("path") == ".github/workflows/ci.yml"
-              and run.get("head_sha") == os.environ["EXPECTED_HEAD"]
-              and any(pr.get("number") == int(os.environ["PR_NUMBER"]) for pr in run.get("pull_requests", []))
-          )
-          if not valid:
-              raise SystemExit("refusing rerun request outside the exact PR workflow and head")
-          PY
+          python tools/rerun_broker.py validate-run \
+            --run-id "$run_id" \
+            --head "$expected_head" \
+            --operation "$operation" \
+            --repository "$REPOSITORY" \
+            --pr-number "$PR_NUMBER" \
+            <<<"$run"
           gh api --method POST "repos/${REPOSITORY}/actions/runs/${run_id}/rerun"

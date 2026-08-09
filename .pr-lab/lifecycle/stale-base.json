@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "id": "stale-base",
+  "purpose": "Observe a pull request become stale after its base advances and become current after an explicit update.",
+  "content_scenario": {
+    "id": "clean-green",
+    "manifest": ".pr-lab/scenarios/clean-green/scenario.json",
+    "manifest_sha256": "50c359d21463760bae9f45f8621110a3e5e5327fef0cd0cac668e11a100c401f"
+  },
+  "initial_provider_state": {
+    "pull_request": "open",
+    "head_branch": "present",
+    "readiness": "ready",
+    "base_relation": "current",
+    "mergeability": "mergeable",
+    "collaboration": "maintainer-edits",
+    "review": "pending"
+  },
+  "operator_actions": [
+    {
+      "id": "advance-base",
+      "actor": "operator",
+      "operation": "advance-base"
+    },
+    {
+      "id": "update-branch",
+      "actor": "author",
+      "operation": "update-branch"
+    }
+  ],
+  "expected_transitions": [
+    {
+      "after_action": "advance-base",
+      "field": "base_relation",
+      "from": "current",
+      "to": "stale"
+    },
+    {
+      "after_action": "update-branch",
+      "field": "base_relation",
+      "from": "stale",
+      "to": "current"
+    }
+  ],
+  "completion_conditions": [
+    {
+      "field": "base_relation",
+      "equals": "current"
+    }
+  ],
+  "cleanup_expectations": [
+    {
+      "id": "close-pull-request",
+      "actor": "operator",
+      "operation": "close-pull-request",
+      "field": "pull_request",
+      "from": "open",
+      "to": "closed"
+    },
+    {
+      "id": "delete-head-branch",
+      "actor": "operator",
+      "operation": "delete-head-branch",
+      "field": "head_branch",
+      "from": "present",
+      "to": "deleted"
+    }
+  ]
+}

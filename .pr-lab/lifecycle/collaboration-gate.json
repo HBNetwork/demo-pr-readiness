@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "id": "collaboration-gate",
+  "purpose": "Observe maintainer-edit access and independent reviewer approval as explicit collaboration gates.",
+  "content_scenario": {
+    "id": "clean-green",
+    "manifest": ".pr-lab/scenarios/clean-green/scenario.json",
+    "manifest_sha256": "50c359d21463760bae9f45f8621110a3e5e5327fef0cd0cac668e11a100c401f"
+  },
+  "initial_provider_state": {
+    "pull_request": "open",
+    "head_branch": "present",
+    "readiness": "ready",
+    "base_relation": "current",
+    "mergeability": "mergeable",
+    "collaboration": "restricted",
+    "review": "pending"
+  },
+  "operator_actions": [
+    {
+      "id": "enable-maintainer-edits",
+      "actor": "author",
+      "operation": "enable-maintainer-edits"
+    },
+    {
+      "id": "submit-approval",
+      "actor": "reviewer",
+      "operation": "submit-approval"
+    }
+  ],
+  "expected_transitions": [
+    {
+      "after_action": "enable-maintainer-edits",
+      "field": "collaboration",
+      "from": "restricted",
+      "to": "maintainer-edits"
+    },
+    {
+      "after_action": "submit-approval",
+      "field": "review",
+      "from": "pending",
+      "to": "approved"
+    }
+  ],
+  "completion_conditions": [
+    {
+      "field": "collaboration",
+      "equals": "maintainer-edits"
+    },
+    {
+      "field": "review",
+      "equals": "approved"
+    }
+  ],
+  "cleanup_expectations": [
+    {
+      "id": "close-pull-request",
+      "actor": "operator",
+      "operation": "close-pull-request",
+      "field": "pull_request",
+      "from": "open",
+      "to": "closed"
+    },
+    {
+      "id": "delete-head-branch",
+      "actor": "operator",
+      "operation": "delete-head-branch",
+      "field": "head_branch",
+      "from": "present",
+      "to": "deleted"
+    }
+  ]
+}

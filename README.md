@@ -30,6 +30,34 @@ refuses to overwrite dirty, repaired, instructed, or unrelated work.
 | `agent-repair` | Named fixture test fails | Publish the one pinned repair |
 | `hero-review` | CI passes with three bounded defects | Multi-file review and complete pinned repair |
 
+## Provider lifecycle recipes
+
+Mutable GitHub state stays separate from deterministic content manifests. The
+closed recipes under `.pr-lab/lifecycle/` bind the exact `clean-green` manifest
+bytes while describing provider actions and observable transitions. They are
+validation-only documents: the controller never calls GitHub or performs the
+declared actions or cleanup.
+
+| Recipe | Ordered lifecycle |
+| --- | --- |
+| `draft-to-ready` | Author marks a draft ready |
+| `stale-base` | Operator advances the base; author updates the branch |
+| `true-conflict` | Base advance makes the branch stale and conflicting; author resolves both dimensions |
+| `collaboration-gate` | Author enables maintainer edits; reviewer approves |
+
+Validate the complete registry or one canonical recipe:
+
+```console
+python tools/lifecycle_control.py validate
+python tools/lifecycle_control.py validate draft-to-ready
+python tools/lifecycle_control.py validate --recipe .pr-lab/lifecycle/true-conflict.json
+```
+
+Every recipe declares completion conditions followed by explicit close-PR and
+delete-branch cleanup expectations. Use a fresh branch and PR for live
+qualification; successful validation is not evidence that provider actions
+occurred.
+
 Scenario demonstrations require same-repository branches. Fork pull requests
 skip scenario control but still run lint, type, unit, build, and integration
 checks without persisted checkout credentials.
@@ -95,6 +123,17 @@ to source and payload SHA-256 identities, avoiding that circularity. Manifest
 identity binds the exact JSON bytes rather than a parsed/canonicalized object.
 CI evidence is confined below `.pr-lab/evidence/`, uses the fetched base-to-head
 Git diff, and excludes mutable GitHub review, comment, and conflict state.
+
+## Rerun broker boundary
+
+HamsterDan requests a rerun by posting one exact bot-authored marker containing
+the workflow run, PR head, and producer-owned operation identity. The
+`rerun-broker` workflow checks out trusted default-branch code without persisted
+credentials, then `tools/rerun_broker.py` binds the marker to the API response's
+exact run ID, repository, pull request, event, workflow path, and head SHA. Only
+after validation does the workflow use its scoped `actions: write` permission
+for one rerun POST. The broker does not maintain a replay store; producer-side
+operation identity remains the idempotency owner.
 
 Run checks from this directory with the committed lock. These commands may
 populate the uv cache from the configured package index; `--frozen` prevents

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "recipes": [
+    {
+      "id": "collaboration-gate",
+      "path": ".pr-lab/lifecycle/collaboration-gate.json"
+    },
+    {
+      "id": "draft-to-ready",
+      "path": ".pr-lab/lifecycle/draft-to-ready.json"
+    },
+    {
+      "id": "stale-base",
+      "path": ".pr-lab/lifecycle/stale-base.json"
+    },
+    {
+      "id": "true-conflict",
+      "path": ".pr-lab/lifecycle/true-conflict.json"
+    }
+  ]
+}
